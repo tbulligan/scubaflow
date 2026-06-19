@@ -1,6 +1,6 @@
 # ScubaFlow
 
-A meditative, breath-controlled, zero-HUD neon buoyancy music game built with Phaser and the Web Audio API.
+A flowing, breath-controlled, zero-HUD neon buoyancy music game built with Phaser and the Web Audio API.
 
 ScubaFlow generates an immersive, glowing underwater cave system synchronized dynamically with any custom audio track you upload. Control your buoyancy, maintain your flow, and navigate the depths alongside your AI diving buddy.
 
