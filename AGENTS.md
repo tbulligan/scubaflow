@@ -1,6 +1,6 @@
 # Agent Guidelines — ScubaFlow
 
-Welcome, Agent. This repository contains the prototype for **ScubaFlow**, a meditative, breath-controlled, zero-HUD neon buoyancy music game. This document outlines the architectural guidelines and design principles that MUST be followed.
+Welcome, Agent. This repository contains the prototype for **ScubaFlow**, a flowing, breath-controlled, zero-HUD neon buoyancy music game. This document outlines the architectural guidelines and design principles that MUST be followed.
 
 > [!IMPORTANT]
 > **Agent Directive**: This document must be kept up to date. You must update `AGENTS.md` and keep it current with code changes when necessary.
