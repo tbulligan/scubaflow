@@ -586,16 +586,23 @@ class ScubaFlowScene extends Phaser.Scene {
                 this.scrollSpeed = Phaser.Math.Linear(this.scrollSpeed, this.baseScrollSpeed, dt * 2.5);
             }
 
-            // Score multiplier logic (avoiding silt-outs increases multiplier every 10 seconds)
+            // Score multiplier logic (avoiding silt-outs increases multiplier dynamically)
             if (!this.siltActive) {
                 this.siltFreeTime += delta;
-                let nextMilestone = 10000; // 10 seconds
+                let nextMilestone = this.flowMilestoneInterval || 10000;
                 if (this.siltFreeTime >= nextMilestone) {
                     this.siltFreeTime = 0;
-                    this.scoreMultiplier = Math.min(8, this.scoreMultiplier + 1);
-                    let bonusPoints = 50 * this.scoreMultiplier;
-                    this.pointsScore += bonusPoints;
-                    this.spawnFloatingText(this.player.x, this.player.y - 35, `FLOW x${this.scoreMultiplier}! +${bonusPoints}`, '#00ff66');
+                    if (this.scoreMultiplier < 8) {
+                        this.scoreMultiplier++;
+                        let bonusPoints = 50 * this.scoreMultiplier;
+                        this.pointsScore += bonusPoints;
+                        this.spawnFloatingText(this.player.x, this.player.y - 35, `FLOW x${this.scoreMultiplier}! +${bonusPoints}`, '#00ff66');
+                    } else {
+                        let bonusPoints = 50 * this.scoreMultiplier;
+                        this.pointsScore += bonusPoints;
+                        this.spawnFloatingText(this.player.x, this.player.y - 35, `MAX FLOW! +${bonusPoints}`, '#00f0ff');
+                        this.triggerMaxFlowPulse();
+                    }
                 }
             } else {
                 this.siltFreeTime = 0;
@@ -2300,6 +2307,49 @@ class ScubaFlowScene extends Phaser.Scene {
         this.time.delayedCall(800, () => expl.destroy());
     }
 
+    triggerMaxFlowPulse() {
+        // Camera flash & thump
+        this.cameras.main.flash(350, 0, 240, 255, 0.08);
+
+        let px = this.player.x;
+        let py = this.player.y;
+
+        // Spawn a circular expansion of glowing sparks/bubbles
+        let ring = this.add.particles(px, py, 'spark', {
+            lifespan: 1000,
+            speed: 180,
+            scale: { start: 1.4, end: 0 },
+            alpha: { start: 0.9, end: 0 },
+            quantity: 36,
+            emitting: false
+        });
+
+        let flowHue = (this.baseHue + 120) % 360;
+        ring.particleTint = Phaser.Display.Color.HSLToColor(flowHue / 360, 1.0, 0.6).color;
+        ring.explode();
+
+        this.time.delayedCall(1200, () => ring.destroy());
+
+        // Play an aquatic chime tone
+        let ctx = this.audioContext;
+        if (ctx) {
+            let osc = ctx.createOscillator();
+            let gain = ctx.createGain();
+            osc.connect(gain);
+            gain.connect(this.masterGain);
+
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(660, ctx.currentTime);
+            osc.frequency.exponentialRampToValueAtTime(1320, ctx.currentTime + 0.2);
+
+            gain.gain.setValueAtTime(0.06, ctx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.5);
+
+            osc.start();
+            osc.stop(ctx.currentTime + 0.6);
+        }
+    }
+
     spawnFloatingText(x, y, text, color) {
         let fText = this.add.text(x, y, text, {
             fontFamily: 'Outfit',
@@ -3020,6 +3070,7 @@ class ScubaFlowScene extends Phaser.Scene {
             beats: beats
         };
         this.totalCollectibles = collectibles.length;
+        this.flowMilestoneInterval = Math.max(6000, Math.min(15000, levelLengthMs / 15));
         this.maxPotentialPoints = this.calculateMaxPotentialPoints();
 
         console.log(`Procedural Level Generated! Beats: ${beats.length}, Collectibles: ${this.totalCollectibles}`);
@@ -3037,9 +3088,10 @@ class ScubaFlowScene extends Phaser.Scene {
 
         let events = [];
 
-        // 1. Flow milestones (every 10000ms up to levelLengthMs + 2000)
+        // 1. Flow milestones (every flowMilestoneInterval up to levelLengthMs + 2000)
+        let interval = this.flowMilestoneInterval || 10000;
         let totalDuration = this.levelData.levelLengthMs + 2000;
-        for (let t = 10000; t <= totalDuration; t += 10000) {
+        for (let t = interval; t <= totalDuration; t += interval) {
             events.push({
                 type: 'flow',
                 time: t
