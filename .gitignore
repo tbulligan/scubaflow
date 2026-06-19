@@ -1,0 +1,6 @@
+browser_logs.txt
+__pycache__/
+*.pyc
+.DS_Store
+.idea/
+.vscode/
