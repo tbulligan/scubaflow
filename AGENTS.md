@@ -10,8 +10,10 @@ Welcome, Agent. This repository contains the prototype for **ScubaFlow**, a flow
 ## 1. Source of Truth
 
 The repository code is the absolute source of truth:
-- [index.html](file:///home/tomaso/projects/scubaflow/index.html): Clean, static-only page featuring local music track upload.
+- [index.html](file:///home/tomaso/projects/scubaflow/index.html): Clean, static-only page featuring local music track upload and Open Graph social sharing metadata.
 - [game.js](file:///home/tomaso/projects/scubaflow/game.js): Contains the Core Phaser game logic and Web Audio procedural cave generation.
+- [favicon.svg](file:///home/tomaso/projects/scubaflow/favicon.svg): Sleek, glowing neon vector bubble icon used as the site's favicon.
+- [scubaflow_og_image.png](file:///home/tomaso/projects/scubaflow/scubaflow_og_image.png): Premium high-resolution graphic used for social media link sharing previews.
 - [.agents/ponytail.md](file:///home/tomaso/projects/scubaflow/.agents/ponytail.md): Defines the Ponytail Philosophy.
 
 *Note: Legacy references such as `level1.json` or the reference music track "Dirt" are obsolete.*
