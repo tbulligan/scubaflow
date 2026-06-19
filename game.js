@@ -2329,25 +2329,6 @@ class ScubaFlowScene extends Phaser.Scene {
         ring.explode();
 
         this.time.delayedCall(1200, () => ring.destroy());
-
-        // Play an aquatic chime tone
-        let ctx = this.audioContext;
-        if (ctx) {
-            let osc = ctx.createOscillator();
-            let gain = ctx.createGain();
-            osc.connect(gain);
-            gain.connect(this.masterGain);
-
-            osc.type = 'sine';
-            osc.frequency.setValueAtTime(660, ctx.currentTime);
-            osc.frequency.exponentialRampToValueAtTime(1320, ctx.currentTime + 0.2);
-
-            gain.gain.setValueAtTime(0.06, ctx.currentTime);
-            gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.5);
-
-            osc.start();
-            osc.stop(ctx.currentTime + 0.6);
-        }
     }
 
     spawnFloatingText(x, y, text, color) {
