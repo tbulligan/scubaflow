@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ScubaFlow — Neon Buoyancy Music Game</title>
+    <script>
+        // Redirect browser logs to server for analysis
+        (function() {
+            function sendLog(type, args) {
+                const message = Array.from(args).map(arg => {
+                    if (arg instanceof Error) {
+                        return arg.message + '\n' + arg.stack;
+                    } else if (typeof arg === 'object') {
+                        try {
+                            return JSON.stringify(arg);
+                        } catch (e) {
+                            return String(arg);
+                        }
+                    } else {
+                        return String(arg);
+                    }
+                }).join(' ');
+
+                fetch('/log', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ type: type, message: message })
+                }).catch(err => {});
+            }
+
+            const originalLog = console.log;
+            console.log = function() {
+                sendLog('log', arguments);
+                originalLog.apply(console, arguments);
+            };
+
+            const originalError = console.error;
+            console.error = function() {
+                sendLog('error', arguments);
+                originalError.apply(console, arguments);
+            };
+
+            const originalWarn = console.warn;
+            console.warn = function() {
+                sendLog('warn', arguments);
+                originalWarn.apply(console, arguments);
+            };
+
+            window.onerror = function(message, source, lineno, colno, error) {
+                sendLog('error', [`Global Error: ${message} at ${source}:${lineno}:${colno}`, error]);
+            };
+
+            window.addEventListener('unhandledrejection', function(event) {
+                sendLog('error', ['Unhandled Promise Rejection:', event.reason]);
+            });
+            console.log("Console redirection active.");
+        })();
+    </script>
+    <meta name="description" content="An action-focused neon buoyancy music game where you control your depth purely with your spacebar and navigate challenging cave tunnels.">
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;600&family=Outfit:wght@200;400;700&display=swap" rel="stylesheet">
+    <!-- Phaser CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser.min.js"></script>
+    <style>
+        :root {
+            --bg-color: #020514;
+            --primary: #00f0ff;
+            --secondary: #bd00ff;
+            --text-color: #e2e8f0;
+            --card-bg: rgba(8, 14, 38, 0.75);
+            --card-border: rgba(0, 240, 255, 0.2);
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            font-family: 'Outfit', sans-serif;
+            overflow: hidden;
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        /* Glowing background radial gradient for underwater depth visual */
+        .ambient-glow {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: radial-gradient(circle at 50% 50%, #0a2046 0%, #020514 100%);
+            z-index: -1;
+        }
+
+        #game-container {
+            width: 1200px;
+            height: 700px;
+            position: relative;
+            box-shadow: 0 0 60px rgba(0, 240, 255, 0.15);
+            border-radius: 16px;
+            overflow: hidden;
+            border: 1px solid rgba(0, 240, 255, 0.12);
+            background-color: #010410;
+        }
+
+        /* Intro Screen Overlay (Web Audio Unlocker) */
+        #intro-screen {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(2, 5, 20, 0.85);
+            backdrop-filter: blur(12px);
+            z-index: 10;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            transition: opacity 0.9s cubic-bezier(0.4, 0, 0.2, 1), transform 0.9s cubic-bezier(0.4, 0, 0.2, 1), filter 0.9s ease-in-out;
+            transform: scale(1);
+            filter: blur(0px);
+        }
+
+        #intro-screen.descending {
+            opacity: 0;
+            transform: scale(1.08) translateY(-50px);
+            filter: blur(10px);
+            pointer-events: none;
+        }
+
+        .glass-card {
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 24px;
+            padding: 24px 30px;
+            max-width: 600px;
+            max-height: 85vh;
+            width: 90%;
+            text-align: center;
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5), inset 0 1px 1px rgba(255, 255, 255, 0.05);
+            transform: scale(1);
+            transition: transform 0.3s ease;
+            overflow-y: auto;
+        }
+
+        .glass-card:hover {
+            transform: translateY(-2px);
+            border-color: rgba(0, 240, 255, 0.4);
+            box-shadow: 0 25px 60px rgba(0, 240, 255, 0.1), 0 20px 50px rgba(0, 0, 0, 0.5);
+        }
+
+        h1 {
+            font-size: 2.5rem;
+            font-weight: 700;
+            background: linear-gradient(135deg, #00f0ff 0%, #bd00ff 100%);
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 4px;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+        }
+
+        .subtitle {
+            font-family: 'Montserrat', sans-serif;
+            font-size: 0.85rem;
+            font-weight: 300;
+            letter-spacing: 3px;
+            color: #94a3b8;
+            text-transform: uppercase;
+            margin-bottom: 16px;
+        }
+
+        .instructions {
+            text-align: left;
+            margin-bottom: 16px;
+            background: rgba(255, 255, 255, 0.02);
+            padding: 14px;
+            border-radius: 12px;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .instructions h3 {
+            font-size: 0.95rem;
+            color: var(--primary);
+            margin-bottom: 8px;
+            font-weight: 600;
+        }
+
+        .instructions p {
+            font-size: 0.82rem;
+            line-height: 1.4;
+            color: #cbd5e1;
+            margin-bottom: 8px;
+        }
+
+        .instructions strong {
+            color: #fff;
+        }
+
+        .btn-dive {
+            background: linear-gradient(135deg, #00f0ff 0%, #bd00ff 100%);
+            border: none;
+            color: white;
+            padding: 12px 30px;
+            font-size: 1.05rem;
+            font-family: 'Outfit', sans-serif;
+            font-weight: 600;
+            border-radius: 50px;
+            cursor: pointer;
+            box-shadow: 0 0 25px rgba(0, 240, 255, 0.4);
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            outline: none;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .btn-dive::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.3), transparent);
+            transition: 0.5s;
+        }
+
+        .btn-dive:hover {
+            transform: scale(1.05);
+            box-shadow: 0 0 35px rgba(189, 0, 255, 0.6);
+        }
+
+        .btn-dive:hover::after {
+            left: 100%;
+        }
+
+        .btn-dive:active {
+            transform: scale(0.98);
+        }
+
+        /* Ambient floating bubbles in HTML background */
+        .bubble-bg {
+            position: absolute;
+            background: rgba(0, 240, 255, 0.1);
+            border-radius: 50%;
+            bottom: -50px;
+            animation: float-bubble 12s infinite linear;
+            pointer-events: none;
+            z-index: -1;
+        }
+
+        @keyframes float-bubble {
+            0% { transform: translateY(0) translateX(0); opacity: 0; }
+            10% { opacity: 0.3; }
+            90% { opacity: 0.3; }
+            100% { transform: translateY(-900px) translateX(80px); opacity: 0; }
+        }
+
+        /* Uploader Styles */
+        .uploader-container {
+            margin-bottom: 16px;
+        }
+
+        .file-label {
+            display: block;
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px dashed rgba(0, 240, 255, 0.25);
+            color: #cbd5e1;
+            padding: 12px 20px;
+            border-radius: 12px;
+            cursor: pointer;
+            font-family: 'Outfit', sans-serif;
+            font-size: 0.85rem;
+            letter-spacing: 1px;
+            transition: all 0.2s ease;
+            text-align: center;
+        }
+
+        .file-label:hover {
+            border-color: var(--primary);
+            color: #fff;
+            background: rgba(0, 240, 255, 0.04);
+        }
+    </style>
+</head>
+<body>
+    <div class="ambient-glow"></div>
+
+    <!-- Background decorative floating bubbles -->
+    <div class="bubble-bg" style="width: 20px; height: 20px; left: 8%; animation-duration: 9s; animation-delay: 0s;"></div>
+    <div class="bubble-bg" style="width: 35px; height: 35px; left: 22%; animation-duration: 15s; animation-delay: 2s;"></div>
+    <div class="bubble-bg" style="width: 18px; height: 18px; left: 78%; animation-duration: 11s; animation-delay: 1s;"></div>
+    <div class="bubble-bg" style="width: 26px; height: 26px; left: 88%; animation-duration: 13s; animation-delay: 3s;"></div>
+
+    <div id="game-container">
+        <!-- Interactive Start Overlay -->
+        <div id="intro-screen">
+            <div class="glass-card">
+                <h1>ScubaFlow</h1>
+                <div class="subtitle">Neon Buoyancy Music Game</div>
+                
+                <div class="instructions">
+                    <h3>HOW TO PLAY:</h3>
+                    <p>⬆️ <strong>Spacebar (HOLD)</strong>: Increase buoyancy to rise up.</p>
+                    <p>⬇️ <strong>Spacebar (RELEASE)</strong>: Decrease buoyancy to sink down.</p>
+                    <p>💎 <strong>Collectibles</strong>: Align your path precisely with the neon debris. Auto-collect is disabled; gathering is a pure test of your buoyancy skills!</p>
+                    <p>🌫️ <strong>Avoid Silt-Outs</strong>: Colliding with the cave walls triggers a silt-out, blinding you and resetting your flow multiplier. Stay centered to maintain your flow!</p>
+                </div>
+
+                <div class="uploader-container">
+                    <label for="audio-file-input" class="file-label" id="file-label-text">
+                        🎵 UPLOAD MUSIC TRACK TO DIVE (.mp3, .wav, .ogg)
+                    </label>
+                    <input type="file" id="audio-file-input" accept="audio/*" style="display:none;">
+                </div>
+
+                <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;">
+                    <div style="flex:1;height:1px;background:rgba(0,240,255,0.15);"></div>
+                    <span style="font-size:0.75rem;color:#64748b;letter-spacing:2px;">OR</span>
+                    <div style="flex:1;height:1px;background:rgba(0,240,255,0.15);"></div>
+                </div>
+
+                <div class="uploader-container" style="display:flex;gap:8px;">
+                    <input id="yt-url-input" type="text" placeholder="🎬 Paste YouTube URL…"
+                        style="flex:1;background:rgba(255,255,255,0.03);border:1px dashed rgba(189,0,255,0.3);color:#cbd5e1;
+                               padding:11px 16px;border-radius:12px;font-family:'Outfit',sans-serif;font-size:0.85rem;
+                               letter-spacing:1px;outline:none;transition:border-color 0.2s;"
+                        onfocus="this.style.borderColor='#bd00ff'" onblur="this.style.borderColor='rgba(189,0,255,0.3)'">
+                    <button id="btn-yt-load" type="button"
+                        style="background:linear-gradient(135deg,#bd00ff,#00f0ff);border:none;color:#fff;
+                               padding:11px 18px;border-radius:12px;font-family:'Outfit',sans-serif;font-size:0.8rem;
+                               font-weight:600;letter-spacing:1px;cursor:pointer;white-space:nowrap;transition:opacity 0.2s;"
+                        onmouseover="this.style.opacity='0.85'" onmouseout="this.style.opacity='1'">
+                        FETCH
+                    </button>
+                </div>
+                <div id="yt-status" style="font-size:0.75rem;color:#64748b;margin-bottom:8px;min-height:1em;text-align:center;"></div>
+
+                <button id="btn-dive" class="btn-dive" type="button" disabled style="opacity: 0.5; pointer-events: none;">Select a Music Track</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Core Game Controller -->
+    <script>
+        window.selectedAvatar = 'diver';
+        window.customAudioBuffer = null;
+
+        // Custom Audio Loading Logic
+        const fileInput = document.getElementById('audio-file-input');
+        const fileLabelText = document.getElementById('file-label-text');
+        fileInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                fileLabelText.textContent = `⏳ Reading: ${file.name}...`;
+                const reader = new FileReader();
+                reader.onload = (event) => {
+                    window.customAudioBuffer = event.target.result; // Store as ArrayBuffer
+                    fileLabelText.textContent = `✅ Loaded: ${file.name}`;
+                    fileLabelText.style.borderColor = '#00f0ff';
+                    fileLabelText.style.color = '#00f0ff';
+                    
+                    // Enable the button!
+                    const btn = document.getElementById('btn-dive');
+                    btn.removeAttribute('disabled');
+                    btn.style.opacity = '1';
+                    btn.style.pointerEvents = 'auto';
+                    btn.textContent = 'Begin Dive';
+                };
+                reader.readAsArrayBuffer(file);
+            }
+        });
+
+        // YouTube URL fetch handler
+        // Note: uses server-side yt-dlp proxy — for personal/local use only.
+        // YouTube ToS prohibits downloading; this is intended for tracks you own or have rights to.
+        document.getElementById('btn-yt-load').addEventListener('click', async () => {
+            const url = document.getElementById('yt-url-input').value.trim();
+            const status = document.getElementById('yt-status');
+            if (!url) { status.textContent = '⚠️ Paste a YouTube URL first.'; status.style.color = '#fb923c'; return; }
+            status.textContent = '⏳ Fetching audio via server… (may take 10–30s)';
+            status.style.color = '#94a3b8';
+            try {
+                const resp = await fetch('/yt-audio', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ url })
+                });
+                if (!resp.ok) {
+                    const err = await resp.text();
+                    status.textContent = `❌ Server error: ${err}`;
+                    status.style.color = '#f87171';
+                    return;
+                }
+                const arrayBuffer = await resp.arrayBuffer();
+                window.customAudioBuffer = arrayBuffer;
+                status.textContent = '✅ Audio ready! Click Begin Dive.';
+                status.style.color = '#00f0ff';
+                const btn = document.getElementById('btn-dive');
+                btn.removeAttribute('disabled');
+                btn.style.opacity = '1';
+                btn.style.pointerEvents = 'auto';
+                btn.textContent = 'Begin Dive';
+            } catch (e) {
+                status.textContent = `❌ Fetch failed: ${e.message}`;
+                status.style.color = '#f87171';
+            }
+        });
+
+        // Wire-up page start overlay trigger
+        document.getElementById('btn-dive').addEventListener('click', () => {
+            // Create and resume AudioContext inside the user gesture stack to prevent decode hangs
+            try {
+                let AudioContextClass = window.AudioContext || window.webkitAudioContext;
+                window.customAudioContext = new AudioContextClass();
+                if (window.customAudioContext) {
+                    window.customAudioContext.resume();
+                }
+            } catch (e) {
+                console.warn("Failed to pre-initialize AudioContext in click handler:", e);
+            }
+
+            let overlay = document.getElementById('intro-screen');
+            overlay.classList.add('descending');
+            setTimeout(() => {
+                overlay.style.display = 'none';
+                startGame();
+                
+                // Focus the window and the game canvas to capture keyboard events immediately
+                window.focus();
+                setTimeout(() => {
+                    let canvas = document.querySelector('canvas');
+                    if (canvas) {
+                        canvas.setAttribute('tabindex', '0');
+                        canvas.focus();
+                    }
+                }, 150);
+            }, 950);
+        });
+    </script>
+    <script src="game.js"></script>
+</body>
+</html>
