@@ -44,7 +44,9 @@ The repository code is the absolute source of truth:
   - This guarantees that all generated sloping tunnels are navigable and that all procedural collectibles (spanned up to $40\text{px}$ offset) are mathematically attainable.
 
 ### End of Dive Sequence
-- Upon reaching the end of the track (`levelData.levelLengthMs`), the game initiates a 2-second fadeout sequence before displaying the final results card.
+- Upon reaching the end of the track (`levelData.levelLengthMs`) or when the Web Audio track finishes playing (`musicSource.onended`), the game initiates a 2-second fadeout sequence before displaying the final results card.
+- The `musicSource.onended` handler is critical for handling cases where the browser window/tab is not in focus (e.g., during Autopilot/Music Visualizer mode) and the Phaser update loop is throttled or paused by the browser.
+- A redundant `setTimeout` fallback is used in `startFadeout` alongside Phaser's clock-based `time.delayedCall` to ensure the HTML results card is successfully rendered in the DOM even when the window is blurred.
 - During this transition, the camera fades out to `#020514` and the Web Audio API master gain exponentially ramps down to `0.0001`, while all regular gameplay systems (including collision detection and collectible collecting) remain fully active.
 
 ### Zero-HUD Diegetic Signals

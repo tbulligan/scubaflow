@@ -59,6 +59,7 @@ class ScubaFlowScene extends Phaser.Scene {
         this.clusterTotals = {};
         this.clusterCollected = {};
         this.isFadingOut = false;
+        this.isLevelCompleted = false;
     }
 
     preload() {
@@ -2642,6 +2643,14 @@ class ScubaFlowScene extends Phaser.Scene {
         this.musicGain.connect(this.musicFilter);
         this.musicFilter.connect(this.masterGain);
         this.musicStartTime = ctx.currentTime;
+
+        this.musicSource.onended = () => {
+            console.log("musicSource onended fired");
+            if (!this.isFadingOut && !this.isLevelCompleted) {
+                this.startFadeout();
+            }
+        };
+
         this.musicSource.start(0);
 
         const sampleRate = ctx.sampleRate;
@@ -2792,12 +2801,19 @@ class ScubaFlowScene extends Phaser.Scene {
         }
 
         // 3. Schedule the levelComplete screen to show after the fadeout finishes (2 seconds)
+        // Redundantly use both Phaser's clock and a browser setTimeout to ensure completion when the tab is blurred.
         this.time.delayedCall(2000, () => {
             this.levelComplete();
         }, [], this);
+
+        setTimeout(() => {
+            this.levelComplete();
+        }, 2000);
     }
 
     levelComplete() {
+        if (this.isLevelCompleted) return;
+        this.isLevelCompleted = true;
         this.isPlaying = false;
 
         let ctx = this.audioContext;
