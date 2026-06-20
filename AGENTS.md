@@ -66,6 +66,7 @@ All gameplay feedback is represented physically and auditorily:
 - **Failure - Silt-Out**: Floor/ceiling collision blinds the player with particle clouds. The player must wait for the silt to clear while staying steady.
   - **Relative Duration**: Silt-out blindness recovery time is proportional to vertical impact velocity (`impactVy`), scaling between 0.44x and 1.33x of `siltDuration` (~800ms to ~2400ms). Soft scrapes are less punishing than hard vertical bumps. Additionally, the duration scales inversely with `baseScrollSpeed` (using the factor $50/\text{baseScrollSpeed}$) to maintain a consistent horizontal distance traveled while blinded across different level speeds.
   - **Dynamic Color Shifts**: On each wall collision, `this.baseHue` shifts complementary by 120 degrees, producing a dramatic, dynamic transition of the cave color palette and matched silt particle coloring.
+  - **Guideline Lifeline**: The buddy's guide line is rendered on a dedicated graphics layer at depth `13` (above the silt overlay), ensuring it remains clearly visible during a silt-out to serve as a diegetic lifeline and guide the player back to the safe centerline.
 - **AI Buddy**: Displays helper speech bubbles ("👌?", "👌!") when assisting the player or clearing/recovering from silt. The buddy utilizes a safe (15px margin) and absolute (2px margin/midpoint fallback) terrain-clamping algorithm so they never collide with the walls or raise sediment on their own.
 
 ---
