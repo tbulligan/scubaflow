@@ -328,7 +328,7 @@ class ScubaFlowScene extends Phaser.Scene {
                 let pPathY = this.getTargetYAtTime(timeAtPlayer);
                 let targetY = pPathY;
 
-                let lookAheadStart = 20; // px
+                let lookAheadStart = 15; // px
                 let lookAheadEnd = 300; // px
                 let totalWeight = 1.0;
                 let weightedY = pPathY * 1.0; // Base weight on centerline path
@@ -338,17 +338,17 @@ class ScubaFlowScene extends Phaser.Scene {
                         if (debris && debris.active) {
                             let dx = debris.x - px;
                             if (dx > lookAheadStart && dx < lookAheadEnd) {
-                                // Weight decreases linearly with distance
-                                let weight = (lookAheadEnd - dx) / (lookAheadEnd - lookAheadStart);
-                                weightedY += debris.y * weight * 1.5;
-                                totalWeight += weight * 1.5;
+                                // Weight increases exponentially as we get closer to the debris
+                                let weight = Math.pow((lookAheadEnd - dx) / (lookAheadEnd - lookAheadStart), 2);
+                                weightedY += debris.y * weight * 2.5;
+                                totalWeight += weight * 2.5;
                             }
                         }
                     });
                 }
                 targetY = weightedY / totalWeight;
 
-                // Calculate safe zone corridor boundaries using player checkpoints to guarantee no silt-outs
+                // Clamp targetY inside the corridor so we don't try to steer past walls
                 let minYAllowed = -9999;
                 let maxYAllowed = 9999;
                 let safetyMargin = 12; // 12px safe clearance buffer
@@ -370,32 +370,22 @@ class ScubaFlowScene extends Phaser.Scene {
                     }
                 }
 
-                // Clamp targetY inside the corridor so we don't try to steer past walls
                 if (minYAllowed <= maxYAllowed) {
                     targetY = Phaser.Math.Clamp(targetY, minYAllowed, maxYAllowed);
                 }
 
-                // PD controller deciding whether to simulate spaceDown (inhale) with hysteresis to prevent chattering/jerkiness
-                let errorY = targetY - this.player.y;
-                let controlSignal = -errorY * 0.018 + this.vy * 0.008;
+                // Glide player smoothly towards the target path (completely organic visualizer glide)
+                let lastY = this.player.y;
+                this.player.y = Phaser.Math.Linear(this.player.y, targetY, 1 - Math.exp(-6 * dt));
+                
+                // Calculate simulated velocity
+                this.vy = (this.player.y - lastY) / dt;
 
-                // Wall avoidance potential field forces to naturally steer away from ceiling/floor early
-                let ceilDist = this.player.y - minYAllowed;
-                let floorDist = maxYAllowed - this.player.y;
-                let avoidanceThreshold = 35; // start avoiding when 35px from wall
-                let avoidanceWeight = 0.015;
-
-                if (ceilDist < avoidanceThreshold && ceilDist > 0) {
-                    controlSignal -= (avoidanceThreshold - ceilDist) * avoidanceWeight;
-                }
-                if (floorDist < avoidanceThreshold && floorDist > 0) {
-                    controlSignal += (avoidanceThreshold - floorDist) * avoidanceWeight;
-                }
-
-                if (controlSignal > 0.20) {
-                    this.simulatedSpaceDown = true;
-                } else if (controlSignal < -0.20) {
-                    this.simulatedSpaceDown = false;
+                // Sync simulated input spaceDown based on actual vertical velocity direction
+                if (this.vy < -10) {
+                    this.simulatedSpaceDown = true; // Inhale when rising
+                } else if (this.vy > 10) {
+                    this.simulatedSpaceDown = false; // Exhale when sinking
                 }
             }
 
@@ -450,12 +440,14 @@ class ScubaFlowScene extends Phaser.Scene {
 
             // 3. Simplified Buoyancy Physics
             let lastY = this.player.y;
-            this.buoyancySmooth += (this.V_lung - this.buoyancySmooth) * dt * 4.5;
-            let ay = (this.buoyancySmooth - 0.5) * -600; // Damped to ±300 px/s² for fine steering
+            if (!this.useAutopilot) {
+                this.buoyancySmooth += (this.V_lung - this.buoyancySmooth) * dt * 4.5;
+                let ay = (this.buoyancySmooth - 0.5) * -600; // Damped to ±300 px/s² for fine steering
 
-            this.vy += ay * dt;
-            this.vy *= Math.exp(-this.dragCoeff * dt);
-            this.player.y += this.vy * dt;
+                this.vy += ay * dt;
+                this.vy *= Math.exp(-this.dragCoeff * dt);
+                this.player.y += this.vy * dt;
+            }
 
             // Strict position-clamping for Autopilot to guarantee 100% no silt-outs
             if (this.useAutopilot) {
@@ -482,16 +474,9 @@ class ScubaFlowScene extends Phaser.Scene {
                 }
 
                 if (minYAllowed <= maxYAllowed) {
-                    if (this.player.y < minYAllowed) {
-                        this.player.y = minYAllowed;
-                        if (this.vy < 0) this.vy = 0; // absorb velocity to prevent bounce
-                    } else if (this.player.y > maxYAllowed) {
-                        this.player.y = maxYAllowed;
-                        if (this.vy > 0) this.vy = 0; // absorb velocity to prevent bounce
-                    }
+                    this.player.y = Phaser.Math.Clamp(this.player.y, minYAllowed, maxYAllowed);
                 } else {
                     this.player.y = (minYAllowed + maxYAllowed) / 2;
-                    this.vy = 0;
                 }
 
                 // Update vy post-clamp for visual/audio effects
@@ -2612,11 +2597,16 @@ class ScubaFlowScene extends Phaser.Scene {
         let highFreqSpikeF = (Math.sin(wx * 0.09) * 8 + Math.cos(wx * 0.18) * 4) * jaggednessMultiplier;
         let highFreqSpikeC = (Math.sin(wx * 0.08) * 8 + Math.cos(wx * 0.17) * 4) * jaggednessMultiplier;
 
-        // Combine base offsets, low-frequency curves, and high-frequency spikes
         let floorOffset = Math.max(minCap, baseOffset + (Math.cos(wx * 0.015) * 10 + Math.sin(wx * 0.04) * 5) * jaggednessMultiplier - highFreqSpikeF) + beatPulseOffset;
         let ceilOffset = Math.max(minCap, baseOffset + (Math.sin(wx * 0.02) * 10 + Math.cos(wx * 0.05) * 5) * jaggednessMultiplier - highFreqSpikeC) + beatPulseOffset;
 
-        return { floorOffset, ceilOffset };
+        // Guarantee 100% collectability without wall collisions:
+        // Max downward offset is 40px (+8px player torso + 16px safety margin = 64px min floor offset)
+        // Max upward offset is 28px (+16px player top + 16px safety margin = 60px min ceiling offset)
+        return { 
+            floorOffset: Math.max(64, floorOffset), 
+            ceilOffset: Math.max(60, ceilOffset) 
+        };
     }
 
     getCurrentDepthZone() {
