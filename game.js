@@ -3071,11 +3071,11 @@ class ScubaFlowScene extends Phaser.Scene {
                 targetY = prevY + Math.sign(dy) * maxDeltaY;
             }
 
-            if (timeMs < 8000) {
-                let tRatio = timeMs / 8000;
+            if (timeMs < 4000) {
+                let tRatio = timeMs / 4000;
                 targetY = 250 + (targetY - 250) * tRatio;
-            } else if (timeMs > levelLengthMs - 4000) {
-                let tRatio = (levelLengthMs - timeMs) / 4000;
+            } else if (timeMs > levelLengthMs - 2000) {
+                let tRatio = (levelLengthMs - timeMs) / 2000;
                 targetY = 250 + (targetY - 250) * tRatio;
             }
 
@@ -3090,13 +3090,14 @@ class ScubaFlowScene extends Phaser.Scene {
         this.clusterTotals = {};
         this.clusterCollected = {};
 
+        let forceSpawnThreshold = spacerTime * 1.5;
         for (let i = 1; i < rawEnergy.length - 1; i++) {
             let timeMs = i * windowSec * 1000;
 
-            if (timeMs < 8000 || timeMs > levelLengthMs - 4000) continue;
+            if (timeMs < 4000 || timeMs > levelLengthMs - 2000) continue;
 
             let isPeak = (rawEnergy[i] > rawEnergy[i - 1] && rawEnergy[i] > rawEnergy[i + 1]) && (rawEnergy[i] > maxRawEnergy * 0.22);
-            let forceSpawn = (timeMs - lastColTime >= 4500);
+            let forceSpawn = (timeMs - lastColTime >= forceSpawnThreshold);
 
             if (isPeak || forceSpawn) {
                 if (timeMs - lastColTime >= spacerTime) {
@@ -3331,9 +3332,9 @@ class ScubaFlowScene extends Phaser.Scene {
         // Verify collectibles generated on silent track
         console.assert(this.levelData.collectibles.length > 0, `Assertion Failed: Silent tracks must still generate collectibles to avoid empty tunnels`);
         
-        // Check maximum gap between collectibles in the playable region (8s to duration - 4s)
+        // Check maximum gap between collectibles in the playable region (4s to duration - 2s)
         let sortedCols = [...this.levelData.collectibles].sort((a, b) => a.time - b.time);
-        let lastTime = 8000;
+        let lastTime = 4000;
         for (let col of sortedCols) {
             let gap = col.time - lastTime;
             console.assert(gap <= 6800, `Assertion Failed: Large gap between collectibles detected: ${gap}ms`);
