@@ -25,6 +25,10 @@ The repository code is the absolute source of truth:
 ### Web Audio API Synchronization & Procedural Generation
 - The game procedurally generates cave paths, beats, depth zones, and collectible clusters directly from any custom audio track uploaded in the browser.
 - All rhythm parsing, concentric visual ripples, and audio events are synchronized using the Web Audio API context time (`audioContext.currentTime`), not Phaser's delta frames.
+- **Deterministic Procedural Level Generation (PRNG Seeding)**: To ensure fairness for future scoreboards and high-score systems, the level generation must be completely deterministic for the same audio file.
+  - The procedural generator computes a 32-bit FNV-1a hash of the track's duration, sample rate, and a 1000-point sample of its channel data.
+  - This hash is used as the seed for a custom Mulberry32 PRNG.
+  - All randomized generation choices (such as `forceSpawn` cluster patterns and ascending/descending slope directions) use this PRNG instead of the standard unseeded `Math.random()`, guaranteeing that replaying the same audio file produces the identical level layout, collectible density, and maximum potential score every time.
 
 ### Breath Physics & State Machine
 - Vertical motion is simulated using simple buoyancy and drag physics:

@@ -2146,6 +2146,41 @@ class ScubaFlowScene extends Phaser.Scene {
         return ((s ^ (s >>> 16)) >>> 0) / 0xffffffff;
     }
 
+    getAudioBufferHash(audioBuffer) {
+        let channelData = audioBuffer.getChannelData(0);
+        let duration = audioBuffer.duration;
+        let sampleRate = audioBuffer.sampleRate;
+
+        // FNV-1a 32-bit offset basis
+        let hash = 2166136261;
+        let str = duration.toString() + sampleRate.toString();
+        for (let i = 0; i < str.length; i++) {
+            hash ^= str.charCodeAt(i);
+            hash = Math.imul(hash, 16777619);
+        }
+
+        // Fast sampling of audio channel data (1000 points) to create signature
+        let samplesToHash = 1000;
+        let step = Math.max(1, Math.floor(channelData.length / samplesToHash));
+        for (let i = 0; i < channelData.length; i += step) {
+            let val = channelData[i];
+            let intVal = Math.floor((val + 1) * 1000000);
+            hash ^= intVal;
+            hash = Math.imul(hash, 16777619);
+        }
+
+        return hash >>> 0; // Unsigned 32-bit int
+    }
+
+    createMulberry32(seed) {
+        return function() {
+            let t = seed += 0x6D2B79F5;
+            t = Math.imul(t ^ (t >>> 15), t | 1);
+            t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+            return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+        };
+    }
+
     drawWallOpenings(g, startX, endX, floorPoints, ceilPoints, floorColor, ceilColor, flowFill, flowSat, flowLightBoost) {
         const SLOT_SIZE = 320; // world-px between opening-slot centres
         const OPEN_CHANCE = 0.55; // probability a slot has an opening
@@ -2923,6 +2958,9 @@ class ScubaFlowScene extends Phaser.Scene {
 
         let levelLengthMs = duration * 1000;
 
+        let seed = this.getAudioBufferHash(audioBuffer);
+        let rng = this.createMulberry32(seed);
+
         let windowSec = 0.5;
         let chunkSize = Math.floor(sampleRate * windowSec);
         let numChunks = Math.floor(channelData.length / chunkSize);
@@ -3101,7 +3139,7 @@ class ScubaFlowScene extends Phaser.Scene {
 
             if (isPeak || forceSpawn) {
                 if (timeMs - lastColTime >= spacerTime) {
-                        let norm = forceSpawn ? Math.random() : (smoothedEnergy[i] / maxEnergy);
+                        let norm = forceSpawn ? rng() : (smoothedEnergy[i] / maxEnergy);
                         let pathIndex = Math.min(path.length - 1, Math.floor(timeMs / (windowSec * 1000)));
                         let pathY = path[pathIndex].y;
                         let cid = "c_" + i;
@@ -3124,7 +3162,7 @@ class ScubaFlowScene extends Phaser.Scene {
                             }
                         } else {
                             // Pattern 3: Steeper ascending or descending slope (5 items)
-                            let isAscending = Math.random() > 0.5;
+                            let isAscending = rng() > 0.5;
                             this.clusterTotals[cid] = 5;
                             for (let k = 0; k < 5; k++) {
                                 let colTime = timeMs + k * 300;
@@ -3340,6 +3378,48 @@ class ScubaFlowScene extends Phaser.Scene {
             console.assert(gap <= 6800, `Assertion Failed: Large gap between collectibles detected: ${gap}ms`);
             lastTime = col.time;
         }
+
+        // Test 8: Deterministic generation and hashing
+        // First generation (saved in this.levelData after generateProceduralLevel(mockAudio))
+        let run1Collectibles = [...this.levelData.collectibles];
+        
+        // Second generation with the exact same mockAudio
+        this.generateProceduralLevel(mockAudio);
+        let run2Collectibles = [...this.levelData.collectibles];
+        
+        console.assert(run1Collectibles.length === run2Collectibles.length, "Assertion Failed: Determinism check - collectible counts differ");
+        for (let i = 0; i < run1Collectibles.length; i++) {
+            console.assert(run1Collectibles[i].time === run2Collectibles[i].time, `Assertion Failed: Determinism check - collectible time mismatch at index ${i}`);
+            console.assert(run1Collectibles[i].y === run2Collectibles[i].y, `Assertion Failed: Determinism check - collectible Y mismatch at index ${i}`);
+            console.assert(run1Collectibles[i].clusterId === run2Collectibles[i].clusterId, `Assertion Failed: Determinism check - collectible clusterId mismatch at index ${i}`);
+        }
+
+        // Third generation with slightly modified audio data (to verify hash change affects layout)
+        let mockAudio2 = {
+            duration: 30,
+            sampleRate: 44100,
+            getChannelData: () => {
+                let arr = new Float32Array(44100 * 30);
+                arr.fill(0.1); // introduce a consistent difference in the audio data
+                return arr;
+            }
+        };
+        this.generateProceduralLevel(mockAudio2);
+        let run3Collectibles = [...this.levelData.collectibles];
+        
+        // Assert that different audio data produces different level layouts
+        let isIdentical = (run1Collectibles.length === run3Collectibles.length);
+        if (isIdentical) {
+            for (let i = 0; i < run1Collectibles.length; i++) {
+                if (run1Collectibles[i].time !== run3Collectibles[i].time || 
+                    run1Collectibles[i].y !== run3Collectibles[i].y || 
+                    run1Collectibles[i].clusterId !== run3Collectibles[i].clusterId) {
+                    isIdentical = false;
+                    break;
+                }
+            }
+        }
+        console.assert(!isIdentical, "Assertion Failed: Hashing check - different audio data did not produce a different layout");
 
         // Restore original state
         this.levelData = originalLevelData;
