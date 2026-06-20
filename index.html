@@ -271,6 +271,34 @@
             color: #fff;
             background: rgba(0, 240, 255, 0.04);
         }
+
+        .menu-links {
+            margin-top: 24px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 16px;
+            font-size: 0.8rem;
+            font-family: 'Montserrat', sans-serif;
+            letter-spacing: 1.5px;
+            text-transform: uppercase;
+        }
+
+        .menu-link {
+            color: #94a3b8;
+            text-decoration: none;
+            transition: all 0.2s ease;
+            cursor: pointer;
+        }
+
+        .menu-link:hover {
+            color: var(--primary);
+            text-shadow: 0 0 8px rgba(0, 240, 255, 0.6);
+        }
+
+        .menu-divider {
+            color: rgba(255, 255, 255, 0.1);
+        }
     </style>
 </head>
 <body>
@@ -305,6 +333,12 @@
                 </div>
 
                 <button id="btn-dive" class="btn-dive" type="button" disabled style="opacity: 0.5; pointer-events: none;">Select a Music Track</button>
+
+                <div class="menu-links">
+                    <a href="https://tomaso.bulligan.com/#contact" target="_blank" rel="noopener noreferrer" class="menu-link">Contact</a>
+                    <span class="menu-divider">|</span>
+                    <a href="https://github.com/tbulligan/scubaflow" target="_blank" rel="noopener noreferrer" class="menu-link">GitHub</a>
+                </div>
             </div>
         </div>
     </div>
