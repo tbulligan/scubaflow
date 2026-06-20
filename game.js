@@ -3090,18 +3090,18 @@ class ScubaFlowScene extends Phaser.Scene {
         this.clusterTotals = {};
         this.clusterCollected = {};
 
-        let forceSpawnThreshold = spacerTime * 1.5;
+        let forceSpawnThreshold = spacerTime * 1.2;
         for (let i = 1; i < rawEnergy.length - 1; i++) {
             let timeMs = i * windowSec * 1000;
 
-            if (timeMs < 4000 || timeMs > levelLengthMs - 2000) continue;
+            if (timeMs < 4000 || timeMs > levelLengthMs - 1200) continue;
 
             let isPeak = (rawEnergy[i] > rawEnergy[i - 1] && rawEnergy[i] > rawEnergy[i + 1]) && (rawEnergy[i] > maxRawEnergy * 0.22);
             let forceSpawn = (timeMs - lastColTime >= forceSpawnThreshold);
 
             if (isPeak || forceSpawn) {
                 if (timeMs - lastColTime >= spacerTime) {
-                        let norm = smoothedEnergy[i] / maxEnergy;
+                        let norm = forceSpawn ? Math.random() : (smoothedEnergy[i] / maxEnergy);
                         let pathIndex = Math.min(path.length - 1, Math.floor(timeMs / (windowSec * 1000)));
                         let pathY = path[pathIndex].y;
                         let cid = "c_" + i;
@@ -3332,7 +3332,7 @@ class ScubaFlowScene extends Phaser.Scene {
         // Verify collectibles generated on silent track
         console.assert(this.levelData.collectibles.length > 0, `Assertion Failed: Silent tracks must still generate collectibles to avoid empty tunnels`);
         
-        // Check maximum gap between collectibles in the playable region (4s to duration - 2s)
+        // Check maximum gap between collectibles in the playable region (4s to duration - 1.2s)
         let sortedCols = [...this.levelData.collectibles].sort((a, b) => a.time - b.time);
         let lastTime = 4000;
         for (let col of sortedCols) {
