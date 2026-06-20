@@ -10,9 +10,8 @@ Welcome, Agent. This repository contains the prototype for **ScubaFlow**, a flow
 ## 1. Source of Truth
 
 The repository code is the absolute source of truth:
-- [index.html](file:///home/tomaso/projects/scubaflow/index.html): Clean page featuring local music track upload, YouTube audio fetching via local proxy, and Open Graph social sharing metadata.
+- [index.html](file:///home/tomaso/projects/scubaflow/index.html): Clean, static-only page featuring local music track upload and Open Graph social sharing metadata.
 - [game.js](file:///home/tomaso/projects/scubaflow/game.js): Contains the Core Phaser game logic and Web Audio procedural cave generation.
-- [server.py](file:///home/tomaso/projects/scubaflow/server.py): Custom Python web server with YouTube audio fetching proxy and console log capture.
 - [favicon.svg](file:///home/tomaso/projects/scubaflow/favicon.svg): Sleek, glowing neon vector bubble icon used as the site's favicon.
 - [scubaflow_og_image.png](file:///home/tomaso/projects/scubaflow/scubaflow_og_image.png): Premium high-resolution graphic used for social media link sharing previews.
 - [PRIVACY.md](file:///home/tomaso/projects/scubaflow/PRIVACY.md): Simple, client-side local-only processing privacy policy statement.
@@ -24,17 +23,23 @@ The repository code is the absolute source of truth:
 ## 2. Core Game Architecture & Systems
 
 ### Web Audio API Synchronization & Procedural Generation
-- The game procedurally generates cave paths, beats, depth zones, and collectible clusters directly from any custom audio track loaded or fetched in the browser.
+- The game procedurally generates cave paths, beats, depth zones, and collectible clusters directly from any custom audio track uploaded in the browser.
 - All rhythm parsing, concentric visual ripples, and audio events are synchronized using the Web Audio API context time (`audioContext.currentTime`), not Phaser's delta frames.
 - **Deterministic Procedural Level Generation (PRNG Seeding)**: To ensure fairness for future scoreboards and high-score systems, the level generation must be completely deterministic for the same audio file.
   - The procedural generator computes a 32-bit FNV-1a hash of the track's duration, sample rate, and a 1000-point sample of its channel data.
   - This hash is used as the seed for a custom Mulberry32 PRNG.
   - All randomized generation choices (such as `forceSpawn` cluster patterns and ascending/descending slope directions) use this PRNG instead of the standard unseeded `Math.random()`, guaranteeing that replaying the same audio file produces the identical level layout, collectible density, and maximum potential score every time.
-
 ### Breath Physics & State Machine
 - Vertical motion is simulated using simple buoyancy and drag physics:
   - **buoyancy**: controlled by lung volume $V_{lung} \in [0, 1]$, which increases when the spacebar is held down (inhaling) and decreases when released (exhaling).
   - **drag**: high vertical hydrodynamic drag dampens velocity to create smooth, floaty maneuvers.
+  - **buoyancy tuning**: buoyancy responsiveness coefficient is set to `4.8` and buoyancy vertical acceleration $a_y$ is set to `640` to ensure responsive, enjoyable vertical adjustments while preventing twitchy oversteering.
+
+### Start Countdown Timer
+- To allow players to prepare for the level, a 3-second countdown timer displays "3", "2", "1", "FLOW!" at the start of a level.
+- During this countdown, positions of the player and buddy are frozen at the starting section of the cave, level progression time is paused at `elapsedTime = 0`, and the background/terrain layers are kept fully rendered.
+- **Flat Starting Zone:** The level generator enforces a flat, wide 15-second starting zone (`introDuration = 15000` ms) on the centerline (Y=250) of the cave. Both the player (spawned at `x = 250`) and buddy (spawned at `x = 550`) are guaranteed to spawn safely without wall collision, and collectibles are blocked from spawning before `17000` ms to ensure they are never out of reach at spawn.
+- Visual ticks are accompanied by procedural audio tone chirps generated via raw `AudioContext` oscillators. Once the countdown completes, the custom audio engine begins and standard gameplay commences.
 
 ### Autopilot & Music Visualizer Mode
 - When Autopilot is toggled in the start menu, vertical buoyancy controls are taken over:
@@ -49,8 +54,10 @@ The repository code is the absolute source of truth:
   - This guarantees that all generated sloping tunnels are navigable and that all procedural collectibles (spanned up to $40\text{px}$ offset) are mathematically attainable.
 
 ### End of Dive Sequence
-- Upon reaching the end of the track (`levelData.levelLengthMs`) or when the Web Audio track finishes playing (`musicSource.onended`), the game initiates a 2-second fadeout sequence before displaying the final results card.
-- The `musicSource.onended` handler is critical for handling cases where the browser window/tab is not in focus (e.g., during Autopilot/Music Visualizer mode) and the Phaser update loop is throttled or paused by the browser.
+- The level completion triggers when the player reaches the end coordinates (`player.x >= targetEndX` where `targetEndX = 250 + (songLengthMs / 1000) * baseScrollSpeed`), the track time completes (`elapsedTime >= songLengthMs`), or `musicSource.onended` fires.
+  - **Constant Scroll Speed:** To ensure points are calculated deterministically and gameplay matches the music exactly, horizontal scroll speed is kept constant (`scrollSpeed = baseScrollSpeed`) at all times.
+  - **Seamless End (No Invisible Wall):** Clamping is disabled; the player continues to glide forward smoothly during the 2-second camera fade-out (to `#020514`) and Web Audio volume ramp-down (to `0.0001`) before the results card displays.
+- The `musicSource.onended` handler is critical for marking the audio as complete, especially when the browser window/tab is out of focus (e.g., during Autopilot/Music Visualizer mode) and the Phaser update loop is throttled.
 - A redundant `setTimeout` fallback is used in `startFadeout` alongside Phaser's clock-based `time.delayedCall` to ensure the HTML results card is successfully rendered in the DOM even when the window is blurred.
 - During this transition, the camera fades out to `#020514` and the Web Audio API master gain exponentially ramps down to `0.0001`, while all regular gameplay systems (including collision detection and collectible collecting) remain fully active.
 
@@ -59,20 +66,35 @@ All gameplay feedback is represented physically and auditorily:
 - **Depth**: Indicated by ambient background HSL color shifts (darkening/shifting colors) and the buddy's depth.
 - **Lung Volume**: Indicated by player sprite chest expansion (ellipse scaling) and breathing audio synth frequencies.
 - **Failure - Silt-Out**: Floor/ceiling collision blinds the player with particle clouds. The player must wait for the silt to clear while staying steady.
+  - **Relative Duration**: Silt-out blindness recovery time is proportional to vertical impact velocity (`impactVy`), scaling between 0.44x and 1.33x of `siltDuration` (~800ms to ~2400ms). Soft scrapes are less punishing than hard vertical bumps. Additionally, the duration scales inversely with `baseScrollSpeed` (using the factor $50/\text{baseScrollSpeed}$) to maintain a consistent horizontal distance traveled while blinded across different level speeds.
+  - **Dynamic Color Shifts**: On each wall collision, `this.baseHue` shifts complementary by 120 degrees, producing a dramatic, dynamic transition of the cave color palette and matched silt particle coloring.
+  - **Guideline Lifeline**: The buddy's guide line is rendered on the terrain graphics layer (depth 0) and is obscured during a silt-out, mirroring the realism of losing visibility of the guideline in a sediment cloud. The player must follow the buddy's speech bubbles ("👌?")—which render at depth 20 (above the silt overlay)—to orient themselves and guide recovery.
 - **AI Buddy**: Displays helper speech bubbles ("👌?", "👌!") when assisting the player or clearing/recovering from silt. The buddy utilizes a safe (15px margin) and absolute (2px margin/midpoint fallback) terrain-clamping algorithm so they never collide with the walls or raise sediment on their own.
 
 ---
 
 ## 3. Development & Environment Setup
 
-- The project uses a micromamba environment named `scubaflow` with Python 3.12.
-- To run the project locally, activate the environment and start the custom web server:
-  ```bash
-  micromamba activate scubaflow
-  python3 server.py
-  ```
-- Open `http://localhost:8000` in the browser.
-- **Testing**: Testing must be performed manually by the user. Do not invoke browser subagents or agentic browsing tools. Use the console logs printed by `server.py` from the browser redirect tool for diagnostics.
+To set up the development environment, use the `scubaflow` micromamba environment:
+```bash
+micromamba activate scubaflow
+```
+
+To run the game locally:
+1. Start a simple static HTTP server in the repository root directory (for example, using Python):
+   ```bash
+   python3 -m http.server 8000
+   ```
+2. Open `http://localhost:8000` in your web browser.
+
+### GitHub Pages Deployment
+1. Push the repository to GitHub:
+   ```bash
+   git push origin main
+   ```
+2. Enable GitHub Pages in your GitHub Repository Settings under **Settings -> Pages**:
+   - Under **Build and deployment -> Source**, select **Deploy from a branch**.
+   - Under **Branch**, select `main` (folder `/root`) and click **Save**.
 
 ---
 
@@ -81,3 +103,4 @@ All gameplay feedback is represented physically and auditorily:
 ### Skipping Agentic Browsing
 - To conserve token usage and maintain execution efficiency, agents MUST NOT run automated agentic browser subagents for visual or gameplay testing.
 - Rely on built-in diagnostic self-tests and request human feedback for manual gameplay/UI verification.
+

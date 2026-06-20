@@ -1,6 +1,73 @@
 // ScubaFlow - Psychedelic Buoyancy Music Game
 // Core Game Logic (Phaser.js & Web Audio API)
 
+class PsychedelicFX extends Phaser.Renderer.WebGL.Pipelines.PostFXPipeline {
+    constructor(game) {
+        super({
+            game: game,
+            name: 'PsychedelicFX',
+            fragShader: `
+                #define SHADER_NAME PSYCHEDELIC_FS
+                precision mediump float;
+                uniform sampler2D uMainSampler;
+                uniform float uBloomIntensity;
+                uniform float uBloomRadius;
+                uniform float uChromaticOffset;
+                varying vec2 outTexCoord;
+                
+                void main() {
+                    // 1. Chromatic Abstraction (horizontal Red/Blue split offset)
+                    vec2 rCoord = outTexCoord + vec2(uChromaticOffset, 0.0);
+                    vec2 bCoord = outTexCoord - vec2(uChromaticOffset, 0.0);
+                    
+                    float r = texture2D(uMainSampler, rCoord).r;
+                    float g = texture2D(uMainSampler, outTexCoord).g;
+                    float b = texture2D(uMainSampler, bCoord).b;
+                    float a = texture2D(uMainSampler, outTexCoord).a;
+                    
+                    vec4 color = vec4(r, g, b, a);
+                    
+                    // 2. Multiplier-scaled Bloom (bright-pass radial blur)
+                    if (uBloomIntensity > 0.0) {
+                        vec4 sum = vec4(0.0);
+                        float totalWeight = 0.0;
+                        for (int x = -3; x <= 3; x++) {
+                            for (int y = -3; y <= 3; y++) {
+                                vec2 offset = vec2(float(x), float(y)) * uBloomRadius;
+                                float br = texture2D(uMainSampler, rCoord + offset).r;
+                                float bg = texture2D(uMainSampler, outTexCoord + offset).g;
+                                float bb = texture2D(uMainSampler, bCoord + offset).b;
+                                vec4 tex = vec4(br, bg, bb, 1.0);
+                                
+                                float brightness = dot(tex.rgb, vec3(0.2126, 0.7152, 0.0722));
+                                float weight = 1.0 - (length(vec2(x, y)) / 5.0);
+                                if (weight > 0.0) {
+                                    sum += tex * step(0.25, brightness) * weight;
+                                    totalWeight += weight;
+                                }
+                            }
+                        }
+                        if (totalWeight > 0.0) {
+                            color.rgb += (sum.rgb / totalWeight) * uBloomIntensity;
+                        }
+                    }
+                    gl_FragColor = color;
+                }
+            `
+        });
+        this.bloomIntensity = 0.0;
+        this.bloomRadius = 0.0015;
+        this.chromaticOffset = 0.0;
+        this.chromaticOffsetStart = 0.0;
+    }
+    
+    onPreRender() {
+        this.set1f('uBloomIntensity', this.bloomIntensity);
+        this.set1f('uBloomRadius', this.bloomRadius);
+        this.set1f('uChromaticOffset', this.chromaticOffset);
+    }
+}
+
 class ScubaFlowScene extends Phaser.Scene {
     constructor() {
         super({ key: 'ScubaFlowScene' });
@@ -65,6 +132,8 @@ class ScubaFlowScene extends Phaser.Scene {
         this.isLevelCompleted = false;
         this.musicCompleted = false;
         this.targetEndX = 0;
+        this.exhaleBubblesCount = 0;
+        this.marineSnowMotes = [];
     }
 
     preload() {
@@ -235,6 +304,32 @@ class ScubaFlowScene extends Phaser.Scene {
                             this.cameras.main.startFollow(this.player, true, 0.1, 1, -250, 0);
                             console.log("Camera follow configured.");
 
+                            // Register and add WebGL post-processing PsychedelicFX pipeline
+                            let renderer = this.renderer;
+                            if (renderer && renderer.pipelines) {
+                                try {
+                                     renderer.pipelines.addPostPipeline('PsychedelicFX', PsychedelicFX);
+                                     this.cameras.main.setPostPipeline(PsychedelicFX);
+                                     console.log("PsychedelicFX WebGL Pipeline registered and attached.");
+                                } catch (e) {
+                                     console.warn("Failed to register WebGL PostFX pipeline:", e);
+                                }
+                            }
+
+                            // Initialize Bioluminescent Marine Snow Motes (80 screen-space motes)
+                            this.marineSnowMotes = [];
+                            for (let i = 0; i < 80; i++) {
+                                this.marineSnowMotes.push({
+                                    x: Math.random() * 1200,
+                                    y: Math.random() * 700,
+                                    vx: -12 - Math.random() * 14,
+                                    vy: -4 + Math.random() * 8,
+                                    size: 1.0 + Math.random() * 1.5,
+                                    alpha: 0.05
+                                });
+                            }
+                            this.marineSnowGraphics = this.add.graphics().setDepth(-1.5).setScrollFactor(0);
+
                             // ONLY destroy text overlay if everything succeeded!
                             statusText.destroy();
                             subText.destroy();
@@ -284,7 +379,7 @@ class ScubaFlowScene extends Phaser.Scene {
         this.elapsedTime = 0;
         this.isPlaying = true; // allow update loop to render the starting scene
 
-        let countdownNumbers = ['3', '2', '1', 'FLOW!'];
+        let countdownNumbers = ['3', '2', '1', 'NEON-FLOW!'];
         let colors = ['#bd00ff', '#00f0ff', '#ff007f', '#00ff66'];
         let index = 0;
 
@@ -306,7 +401,7 @@ class ScubaFlowScene extends Phaser.Scene {
                     osc.connect(gainNode);
                     gainNode.connect(ctx.destination);
                     osc.type = 'sine';
-                    if (numStr === 'FLOW!') {
+                    if (numStr === 'NEON-FLOW!') {
                         osc.frequency.setValueAtTime(440, ctx.currentTime);
                         osc.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 0.25);
                         gainNode.gain.setValueAtTime(0.15, ctx.currentTime);
@@ -701,12 +796,19 @@ class ScubaFlowScene extends Phaser.Scene {
             this.baseHue = (this.baseHue + dt * hueSpeed) % 360;
             let bgHue = (this.baseHue * 0.25) % 360;
             let multiBeat = 1.0 + (this.scoreMultiplier - 1) * 0.55;
-            let lightnessBoost = 0.012 + pulse * 0.022 * multiBeat;
+            
+            // Restrict background beat flashes & zoom throb exclusively to operational modes multiplier >= 8
+            let lightnessBoost = 0.012;
+            let targetZoom = 1.0;
+            if (this.scoreMultiplier >= 8) {
+                lightnessBoost += pulse * 0.022 * multiBeat;
+                targetZoom += pulse * 0.012 * multiBeat;
+            }
+            
             let bgColorObj = Phaser.Display.Color.HSLToColor(bgHue / 360, 0.7, lightnessBoost);
             this.cameras.main.setBackgroundColor(bgColorObj.color);
 
-            // Camera micro-zoom throb on beats — intensity scales with multiplier
-            let targetZoom = 1.0 + pulse * 0.012 * multiBeat;
+            // Camera micro-zoom throb on beats
             this.cameras.main.zoom = Phaser.Math.Linear(this.cameras.main.zoom, targetZoom, 0.15);
 
             // Horizontal scrolling displacement
@@ -802,6 +904,21 @@ class ScubaFlowScene extends Phaser.Scene {
                 this.scrollSpeed = Phaser.Math.Linear(this.scrollSpeed, this.baseScrollSpeed, physDt * 2.5);
             }
 
+            // Update WebGL PostFX shader parameters (Bloom & Chromatic Split)
+            let fx = this.cameras.main.getPostPipeline(PsychedelicFX);
+            if (fx) {
+                // Bloom intensity scales with multiplier: 0 at x1 up to 1.2 at x8
+                let targetBloom = Math.max(0.0, Math.min(1.2, (this.scoreMultiplier - 1) / 7.0 * 1.2));
+                fx.bloomIntensity = Phaser.Math.Linear(fx.bloomIntensity, targetBloom, physDt * 4.0);
+                
+                // Chromatic split decays in sync with silt time
+                if (this.siltActive && this.currentSiltDuration > 0) {
+                    fx.chromaticOffset = (fx.chromaticOffsetStart || 0.02) * Math.max(0, this.siltTime / this.currentSiltDuration);
+                } else {
+                    fx.chromaticOffset = 0;
+                }
+            }
+
             // Score multiplier logic (avoiding silt-outs increases multiplier dynamically)
             if (!this.siltActive) {
                 this.siltFreeTime += deltaMs;
@@ -812,11 +929,11 @@ class ScubaFlowScene extends Phaser.Scene {
                         this.scoreMultiplier++;
                         let bonusPoints = 50 * this.scoreMultiplier;
                         this.pointsScore += bonusPoints;
-                        this.spawnFloatingText(this.player.x, this.player.y - 35, `FLOW x${this.scoreMultiplier}! +${bonusPoints}`, '#00ff66');
+                        this.spawnFloatingText(this.player.x, this.player.y - 35, `NEON-FLOW x${this.scoreMultiplier}! +${bonusPoints}`, '#00ff66');
                     } else {
                         let bonusPoints = 50 * this.scoreMultiplier;
                         this.pointsScore += bonusPoints;
-                        this.spawnFloatingText(this.player.x, this.player.y - 35, `MAX FLOW! +${bonusPoints}`, '#00f0ff');
+                        this.spawnFloatingText(this.player.x, this.player.y - 35, `MAX NEON-FLOW! +${bonusPoints}`, '#00f0ff');
                         this.triggerMaxFlowPulse();
                     }
                 }
@@ -834,6 +951,7 @@ class ScubaFlowScene extends Phaser.Scene {
 
             // 9. Particle emissions
             this.emitBreathingParticles();
+            this.updateMarineSnow(dt);
 
             // 10. Redraw Visualizers and Terrain
             this.drawParallax(time);
@@ -970,6 +1088,18 @@ class ScubaFlowScene extends Phaser.Scene {
             blendMode: 'NORMAL'
         });
         this.siltEmitter.setDepth(9);
+
+        // Volumetric Hydrothermal Plumes Emitter
+        this.plumeEmitter = this.add.particles(0, 0, 'silt_cloud', {
+            lifespan: { min: 1500, max: 2500 },
+            speedY: { min: -140, max: -60 },
+            speedX: { min: -20, max: 20 },
+            scale: { start: 2.0, end: 8.0 },
+            alpha: { start: 0.10, end: 0 },
+            frequency: -1,
+            blendMode: 'ADD'
+        });
+        this.plumeEmitter.setDepth(11); // directly above containers at depth 10
     }
 
     emitBreathingParticles() {
@@ -991,12 +1121,14 @@ class ScubaFlowScene extends Phaser.Scene {
                 let bubbleColor = Phaser.Display.Color.HSLToColor(rndHue / 360, 1.0, 0.65).color;
                 this.bubbleEmitter.particleTint = bubbleColor;
                 this.bubbleEmitter.emitParticleAt(this.player.x + 18, this.player.y - 4);
+                this.exhaleBubblesCount++;
             }
         }
 
         // 2. Periodic natural breathing exhale for player
         if (Math.random() < 0.008) {
             this.emitExhaleBubbles(this.player.x + 18, this.player.y - 4);
+            this.exhaleBubblesCount += 3; // emitExhaleBubbles generates 3 particles
         }
 
         // 3. Periodic natural breathing exhale for buddy
@@ -1016,6 +1148,54 @@ class ScubaFlowScene extends Phaser.Scene {
                 x + Math.random() * 6 - 3,
                 y + Math.random() * 6 - 3
             );
+        }
+    }
+
+    updateMarineSnow(dt) {
+        let g = this.marineSnowGraphics;
+        if (!g) return;
+        g.clear();
+        if (!this.player || !this.buddy) return;
+
+        let camX = this.cameras.main.scrollX;
+        let pHandX = this.player.x + 26;
+        let pHandY = this.player.y - 2;
+
+        let bDir = this.buddy.scaleX || 1;
+        let bHandX = this.buddy.x + 26 * bDir;
+        let bHandY = this.buddy.y - 2;
+
+        for (let mote of this.marineSnowMotes) {
+            mote.x += mote.vx * dt;
+            mote.y += mote.vy * dt;
+
+            // Wrap screen boundaries
+            if (mote.x < 0) mote.x += 1200;
+            if (mote.x > 1200) mote.x -= 1200;
+            if (mote.y < 0) mote.y += 700;
+            if (mote.y > 700) mote.y -= 700;
+
+            // Translate screen position to world position for light cone checks
+            let wx = mote.x + camX;
+            let wy = mote.y;
+
+            // Player light beam check
+            let dxP = wx - pHandX;
+            let dyP = wy - pHandY;
+            let inPlayerCone = (dxP >= 0 && dxP <= 320 && Math.abs(dyP) <= (dxP / 320) * 75);
+
+            // Buddy light beam check
+            let dxB = (wx - bHandX) * bDir;
+            let dyB = wy - bHandY;
+            let inBuddyCone = (dxB >= 0 && dxB <= 320 && Math.abs(dyB) <= (dxB / 320) * 75);
+
+            let illuminated = inPlayerCone || inBuddyCone;
+            let targetAlpha = illuminated ? 0.40 : 0.05;
+            mote.alpha += (targetAlpha - mote.alpha) * 0.1;
+
+            let color = illuminated ? 0x00f0ff : 0x475569;
+            g.fillStyle(color, mote.alpha);
+            g.fillCircle(mote.x, mote.y, mote.size);
         }
     }
 
@@ -2121,6 +2301,16 @@ class ScubaFlowScene extends Phaser.Scene {
                 let cx = slot * SLOT_SIZE + this._seededRnd(seed + 1) * SLOT_SIZE * 0.9 - SLOT_SIZE * 0.45;
                 let { floorY } = getWallY(cx);
 
+                // Map specific particle emission anchor points to floor crack offsets
+                if (this.plumeEmitter && this._seededRnd(seed + 12) < 0.4) {
+                    let plumeHue = (floorHue + 20) % 360;
+                    let plumeColor = Phaser.Display.Color.HSLToColor(plumeHue / 360, 0.9, 0.6).color;
+                    this.plumeEmitter.particleTint = plumeColor;
+                    if (Math.random() < 0.12) {
+                        this.plumeEmitter.emitParticleAt(cx, floorY);
+                    }
+                }
+
                 // Vertical depth into floor rock: 12px to 160px
                 let depth = 12 + this._seededRnd(seed + 2) * 148;
                 let cy = floorY + depth;
@@ -2628,7 +2818,7 @@ class ScubaFlowScene extends Phaser.Scene {
             this.siltActive = true;
             if (this.scoreMultiplier > 1) {
                 this.scoreMultiplier = 1;
-                this.spawnFloatingText(this.player.x, this.player.y - 35, "FLOW RESET", '#ff1e56');
+                this.spawnFloatingText(this.player.x, this.player.y - 35, "NEON-FLOW RESET", '#ff1e56');
             } else {
                 this.scoreMultiplier = 1;
             }
@@ -2638,7 +2828,15 @@ class ScubaFlowScene extends Phaser.Scene {
         // Throttle heavy visuals to every 800ms
         if (this.time.now - (this.lastHeavySilt || 0) > 800) {
             this.lastHeavySilt = this.time.now;
-            this.cameras.main.shake(180, 0.008);
+            
+            // Set chromatic split offset proportional to impactVy instead of screenshake
+            let fx = this.cameras.main.getPostPipeline(PsychedelicFX);
+            if (fx) {
+                let offsetStart = Math.min(0.02, 0.003 + (impactSpeed / 100) * 0.006);
+                fx.chromaticOffset = offsetStart;
+                fx.chromaticOffsetStart = offsetStart;
+            }
+
             this.playSiltThump();
 
             let px = this.player.x;
@@ -3021,6 +3219,100 @@ class ScubaFlowScene extends Phaser.Scene {
             }
         }
 
+        // Local Storage High Scores Keyed by FNV-1a Hash
+        let trackHash = "unknown";
+        if (this.customDecodedBuffer) {
+            trackHash = String(this.getAudioBufferHash(this.customDecodedBuffer));
+        }
+        
+        let scoreKey = `scubaflow_highscore_${trackHash}`;
+        let prevHighPointsScore = 0;
+        let prevMaxCollectiblesPercent = 0;
+        
+        try {
+            let saved = localStorage.getItem(scoreKey);
+            if (saved) {
+                let parsed = JSON.parse(saved);
+                prevHighPointsScore = parsed.highPointsScore || 0;
+                prevMaxCollectiblesPercent = parsed.maxCollectiblesPercent || 0;
+            }
+        } catch (e) {
+            console.error("Failed to read highscore from localStorage", e);
+        }
+        
+        let isNewHighPoints = this.pointsScore > prevHighPointsScore;
+        let highPointsScore = Math.max(prevHighPointsScore, this.pointsScore);
+        let maxCollectiblesPercent = Math.max(prevMaxCollectiblesPercent, debrisPercent);
+        
+        try {
+            localStorage.setItem(scoreKey, JSON.stringify({
+                trackHash: trackHash,
+                highPointsScore: highPointsScore,
+                maxCollectiblesPercent: parseFloat(maxCollectiblesPercent.toFixed(1))
+            }));
+        } catch (e) {
+            console.error("Failed to save highscore to localStorage", e);
+        }
+        
+        // Lifetime Career Profile Tracking
+        let careerKey = "scubaflow_career_profile";
+        let career = {
+            lifetimeDiveTimeMs: 0,
+            lifetimeBubblesBlown: 0,
+            peakScoreMultiplier: 1
+        };
+        try {
+            let savedCareer = localStorage.getItem(careerKey);
+            if (savedCareer) {
+                career = JSON.parse(savedCareer);
+            }
+        } catch (e) {
+            console.error("Failed to read career from localStorage", e);
+        }
+        
+        career.lifetimeDiveTimeMs = (career.lifetimeDiveTimeMs || 0) + this.elapsedTime;
+        career.lifetimeBubblesBlown = (career.lifetimeBubblesBlown || 0) + (this.exhaleBubblesCount || 0);
+        career.peakScoreMultiplier = Math.max(career.peakScoreMultiplier || 1, this.scoreMultiplier);
+        
+        try {
+            localStorage.setItem(careerKey, JSON.stringify(career));
+        } catch (e) {
+            console.error("Failed to save career to localStorage", e);
+        }
+        
+        // Format lifetime stats
+        let totalSecs = Math.floor(career.lifetimeDiveTimeMs / 1000);
+        let mins = Math.floor(totalSecs / 60);
+        let secs = totalSecs % 60;
+        let formattedTime = `${mins}m ${secs}s`;
+        
+        let highScoreHTML = "";
+        if (prevHighPointsScore > 0) {
+            highScoreHTML = `
+                <div style="font-size: 0.95rem; color: #94a3b8; margin-top: 10px; border-top: 1px solid rgba(0, 240, 255, 0.15); padding-top: 12px; display: flex; justify-content: space-around;">
+                    <div>TRACK BEST: <strong style="color: #00f0ff;">${highPointsScore} pts</strong> (${maxCollectiblesPercent.toFixed(1)}%)</div>
+                    ${isNewHighPoints ? '<div style="color: #00ff66; font-weight: bold; animation: pulse 1s infinite alternate; text-shadow: 0 0 8px #00ff66;">★ NEW BEST! ★</div>' : ''}
+                </div>
+            `;
+        } else {
+            highScoreHTML = `
+                <div style="font-size: 0.95rem; color: #94a3b8; margin-top: 10px; border-top: 1px solid rgba(0, 240, 255, 0.15); padding-top: 12px; text-align: center;">
+                    FIRST RUN LOGGED! Track best set to <strong style="color: #00f0ff;">${highPointsScore} pts</strong>
+                </div>
+            `;
+        }
+        
+        let careerHTML = `
+            <div style="margin: 20px 0; padding: 12px 16px; background: rgba(0, 240, 255, 0.03); border: 1px solid rgba(0, 240, 255, 0.1); border-radius: 12px; text-align: left; font-size: 0.85rem; color: #94a3b8; line-height: 1.6;">
+                <div style="font-weight: bold; color: #cbd5e1; margin-bottom: 6px; letter-spacing: 1px; text-transform: uppercase;">LIFETIME NEON-FLOW CAREER:</div>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+                    <div>⏱ Time Drifting: <strong style="color: #e2e8f0;">${formattedTime}</strong></div>
+                    <div>🫧 Bubbles Blown: <strong style="color: #e2e8f0;">${career.lifetimeBubblesBlown}</strong></div>
+                    <div style="grid-column: span 2;">⚡ Peak Flow Multiplier: <strong style="color: #00f0ff;">x${career.peakScoreMultiplier}</strong></div>
+                </div>
+            </div>
+        `;
+
         let parent = document.getElementById('game-container');
         let card = document.createElement('div');
         card.id = 'complete-screen';
@@ -3057,7 +3349,7 @@ class ScubaFlowScene extends Phaser.Scene {
             ? 'background: linear-gradient(135deg, #00f0ff 0%, #ff00e4 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-size: 3.6rem; font-weight: 800; margin-bottom: 20px; letter-spacing: 3px; filter: drop-shadow(0 0 10px rgba(0, 240, 255, 0.6));'
             : 'background: linear-gradient(135deg, #00f0ff 0%, #bd00ff 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-size: 3rem; font-weight: 700; margin-bottom: 20px; letter-spacing: 2px;';
 
-        let titleText = isPerfect ? 'PERFECT FLOW' : 'DIVE COMPLETED';
+        let titleText = isPerfect ? 'PERFECT NEON-FLOW' : 'DIVE COMPLETED';
 
         let innerCard = document.createElement('div');
         innerCard.className = 'glass-card';
@@ -3067,11 +3359,13 @@ class ScubaFlowScene extends Phaser.Scene {
             <div style="margin-bottom: 20px; display: flex; justify-content: center; align-items: center;">
                 ${starString}
             </div>
-            <div style="font-size: 1.15rem; color: #cbd5e1; margin-bottom: 30px; line-height: 1.8;">
+            <div style="font-size: 1.15rem; color: #cbd5e1; margin-bottom: 10px; line-height: 1.8;">
                 Neon Debris Gathered: <strong style="color: #00f0ff; font-size: 1.25rem;">${this.score}</strong> / ${this.totalCollectibles}<br>
                 Total Score: <strong style="color: #bd00ff; font-size: 1.5rem; text-shadow: 0 0 12px rgba(189, 0, 255, 0.4);">${this.pointsScore}</strong> / ${maxPoints} points
             </div>
-            <button id="btn-restart" class="btn-dive" style="box-shadow: 0 0 25px rgba(189, 0, 255, 0.4);">DIVE AGAIN</button>
+            ${highScoreHTML}
+            ${careerHTML}
+            <button id="btn-restart" class="btn-dive" style="box-shadow: 0 0 25px rgba(189, 0, 255, 0.4); margin-top: 10px;">DIVE AGAIN</button>
         `;
         card.appendChild(innerCard);
         parent.appendChild(card);

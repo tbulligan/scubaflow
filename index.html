@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ScubaFlow — Neon Buoyancy Music Game</title>
+    <title>ScubaFlow — Neon-Flow Buoyancy Music Game</title>
     <script>
         // Redirect browser logs to server for analysis
         (function() {
@@ -66,7 +66,7 @@
     <meta property="og:type" content="website">
     <meta property="og:url" content="https://scubaflow.bulligan.com/">
     <meta property="og:site_name" content="ScubaFlow">
-    <meta property="og:title" content="ScubaFlow — Neon Buoyancy Music Game">
+    <meta property="og:title" content="ScubaFlow — Neon-Flow Buoyancy Music Game">
     <meta property="og:description" content="Control your buoyancy, navigate neon cave tunnels, and flow to the rhythm of your own music. Clean zero-HUD experience.">
     <meta property="og:image" content="https://scubaflow.bulligan.com/scubaflow_og_image.png">
     <meta property="og:image:secure_url" content="https://scubaflow.bulligan.com/scubaflow_og_image.png">
@@ -78,7 +78,7 @@
     <!-- Twitter -->
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:url" content="https://scubaflow.bulligan.com/">
-    <meta name="twitter:title" content="ScubaFlow — Neon Buoyancy Music Game">
+    <meta name="twitter:title" content="ScubaFlow — Neon-Flow Buoyancy Music Game">
     <meta name="twitter:description" content="Control your buoyancy, navigate neon cave tunnels, and flow to the rhythm of your own music. Clean zero-HUD experience.">
     <meta name="twitter:image" content="https://scubaflow.bulligan.com/scubaflow_og_image.png">
     <meta name="twitter:image:alt" content="ScubaFlow — Neon Buoyancy Music Game preview showing glowing neon cave tunnels.">
@@ -446,14 +446,14 @@
         <div id="intro-screen">
             <div class="glass-card">
                 <h1>ScubaFlow</h1>
-                <div class="subtitle">Neon Buoyancy Music Game</div>
+                <div class="subtitle">Neon-Flow Buoyancy Music Game</div>
                 
                 <div class="instructions">
                     <h3>HOW TO PLAY:</h3>
                     <p>⬆️ <strong>Spacebar (HOLD)</strong>: Increase buoyancy to rise up.</p>
                     <p>⬇️ <strong>Spacebar (RELEASE)</strong>: Decrease buoyancy to sink down.</p>
                     <p>💎 <strong>Collectibles</strong>: Align your path precisely with the neon debris. Auto-collect is disabled; gathering is a pure test of your buoyancy skills!</p>
-                    <p>🌫️ <strong>Avoid Silt-Outs</strong>: Colliding with the cave walls triggers a silt-out, blinding you and resetting your flow multiplier. Stay centered to maintain your flow!</p>
+                    <p>🌫️ <strong>Avoid Silt-Outs</strong>: Colliding with the cave walls triggers a silt-out, blinding you and resetting your Neon-Flow multiplier. Stay centered to maintain your Neon-Flow!</p>
                 </div>
 
                 <div class="uploader-container">
@@ -484,6 +484,9 @@
                     </button>
                 </div>
                 <div id="yt-status" style="font-size:0.75rem;color:#64748b;margin-bottom:12px;min-height:1em;text-align:center;"></div>
+                
+                <!-- Interactive Waveform Launchpad Card -->
+                <canvas id="waveform-canvas" width="540" height="80" style="display:none; width: 100%; border-radius: 12px; margin-bottom: 16px; background: rgba(2, 5, 20, 0.6); border: 1px solid rgba(0, 240, 255, 0.2);"></canvas>
 
                 <!-- Autopilot / Music Visualizer Switch -->
                 <div class="switch-container" style="margin-bottom: 8px;">
@@ -514,6 +517,76 @@
         window.customAudioBuffer = null;
         window.useAutopilot = false;
 
+        // Draw waveform from decoded audio buffer
+        async function drawWaveform(arrayBuffer) {
+            const canvas = document.getElementById('waveform-canvas');
+            canvas.style.display = 'block';
+            const ctx = canvas.getContext('2d');
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // Draw loading state
+            ctx.fillStyle = '#94a3b8';
+            ctx.font = 'bold 12px Outfit';
+            ctx.textAlign = 'center';
+            ctx.fillText('GENERATING NEON-FLOW WAVEFORM...', canvas.width / 2, canvas.height / 2 + 4);
+            
+            try {
+                let AudioContextClass = window.AudioContext || window.webkitAudioContext;
+                let tempCtx = new AudioContextClass();
+                // Slice to avoid mutating original buffer
+                let decoded = await tempCtx.decodeAudioData(arrayBuffer.slice(0));
+                let channelData = decoded.getChannelData(0);
+                
+                let numPoints = 200;
+                let step = Math.floor(channelData.length / numPoints);
+                let peaks = [];
+                for (let i = 0; i < numPoints; i++) {
+                    let max = 0;
+                    for (let j = 0; j < step; j++) {
+                        let val = Math.abs(channelData[i * step + j]);
+                        if (val > max) max = val;
+                    }
+                    peaks.push(max);
+                }
+                
+                let maxPeak = Math.max(...peaks) || 1;
+                peaks = peaks.map(p => p / maxPeak);
+                
+                // Render stylized neon waveform
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                
+                let grad = ctx.createLinearGradient(0, 0, canvas.width, 0);
+                grad.addColorStop(0, '#00f0ff');
+                grad.addColorStop(0.5, '#bd00ff');
+                grad.addColorStop(1, '#00f0ff');
+                
+                ctx.strokeStyle = grad;
+                ctx.lineWidth = 2.0;
+                ctx.lineCap = 'round';
+                ctx.beginPath();
+                
+                let width = canvas.width;
+                let height = canvas.height;
+                let sliceWidth = width / numPoints;
+                
+                for (let i = 0; i < numPoints; i++) {
+                    let x = i * sliceWidth + sliceWidth / 2;
+                    let yVal = peaks[i] * (height * 0.7);
+                    let y = (height - yVal) / 2;
+                    ctx.moveTo(x, y);
+                    ctx.lineTo(x, y + yVal);
+                }
+                ctx.stroke();
+                canvas.style.boxShadow = '0 0 20px rgba(0, 240, 255, 0.25)';
+                tempCtx.close();
+            } catch (err) {
+                console.error("Waveform error:", err);
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                ctx.fillStyle = '#ff1e56';
+                ctx.fillText('WAVEFORM PREVIEW UNAVAILABLE', canvas.width / 2, canvas.height / 2 + 4);
+            }
+        }
+
         // Autopilot Switch Logic
         document.getElementById('autopilot-checkbox').addEventListener('change', (e) => {
             window.useAutopilot = e.target.checked;
@@ -533,6 +606,9 @@
                     fileLabelText.style.borderColor = '#00f0ff';
                     fileLabelText.style.color = '#00f0ff';
                     
+                    // Render waveform
+                    drawWaveform(event.target.result);
+
                     // Enable the button!
                     const btn = document.getElementById('btn-dive');
                     btn.removeAttribute('disabled');
@@ -569,6 +645,10 @@
                 window.customAudioBuffer = arrayBuffer;
                 status.textContent = '✅ Audio ready! Click Begin Dive.';
                 status.style.color = '#00f0ff';
+
+                // Render waveform
+                drawWaveform(arrayBuffer);
+
                 const btn = document.getElementById('btn-dive');
                 btn.removeAttribute('disabled');
                 btn.style.opacity = '1';
