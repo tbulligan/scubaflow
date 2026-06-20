@@ -48,6 +48,7 @@ class ScubaFlowScene extends Phaser.Scene {
 
         // Sound timing
         this.lastBubbleSoundTime = 0;
+        this.musicStartTime = null;
 
         // Score Flow State points system
         this.siltFreeTime = 0;
@@ -278,8 +279,16 @@ class ScubaFlowScene extends Phaser.Scene {
         try {
             if (!this.isPlaying) return;
 
-            let dt = delta / 1000; // seconds
-            this.elapsedTime += delta;
+            let prevElapsedTime = this.elapsedTime;
+            if (this.musicStartTime !== null && this.audioContext) {
+                this.elapsedTime = (this.audioContext.currentTime - this.musicStartTime) * 1000;
+            } else {
+                this.elapsedTime += delta;
+            }
+            let dt = (this.elapsedTime - prevElapsedTime) / 1000;
+            if (dt <= 0) dt = delta / 1000; // fallback to prevent division by zero/negative steps
+            let deltaMs = dt * 1000;
+            let physDt = Math.min(dt, 0.15); // cap physics step to prevent physics engine explosions
 
             // Ensure we stop when music/level completes
             if (this.elapsedTime >= this.levelData.levelLengthMs) {
@@ -362,19 +371,19 @@ class ScubaFlowScene extends Phaser.Scene {
 
                 // Glide player smoothly towards the target path (completely organic visualizer glide)
                 let lastY = this.player.y;
-                this.player.y = Phaser.Math.Linear(this.player.y, targetY, 1 - Math.exp(-6 * dt));
+                this.player.y = Phaser.Math.Linear(this.player.y, targetY, 1 - Math.exp(-6 * physDt));
                 
                 // Calculate simulated velocity
-                this.vy = (this.player.y - lastY) / dt;
+                this.vy = (this.player.y - lastY) / physDt;
             }
 
             // Standard input & lung volume simulation (shared between manual & autopilot)
             let spaceDown = this.useAutopilot ? this.simulatedSpaceDown : this.spaceKey.isDown;
             let fillRate = 3.0;
             if (spaceDown) {
-                this.V_lung = Math.min(1.0, this.V_lung + fillRate * dt);
+                this.V_lung = Math.min(1.0, this.V_lung + fillRate * physDt);
             } else {
-                this.V_lung = Math.max(0.0, this.V_lung - fillRate * dt);
+                this.V_lung = Math.max(0.0, this.V_lung - fillRate * physDt);
             }
 
             // Audio Breathing Volumes
@@ -397,7 +406,7 @@ class ScubaFlowScene extends Phaser.Scene {
                         this.exhaleGain.gain.setTargetAtTime(rumble, ctx.currentTime, 0.05);
 
                         // Trigger bubble chirps for exhaling
-                        this.lastBubbleSoundTime += delta;
+                        this.lastBubbleSoundTime += deltaMs;
                         let nextBubbleInterval = 60 + Math.random() * 50;
                         if (this.lastBubbleSoundTime >= nextBubbleInterval) {
                             this.lastBubbleSoundTime = 0;
@@ -425,12 +434,12 @@ class ScubaFlowScene extends Phaser.Scene {
             // 3. Simplified Buoyancy Physics
             let lastY = this.player.y;
             if (!this.useAutopilot) {
-                this.buoyancySmooth += (this.V_lung - this.buoyancySmooth) * dt * 4.5;
+                this.buoyancySmooth += (this.V_lung - this.buoyancySmooth) * physDt * 4.5;
                 let ay = (this.buoyancySmooth - 0.5) * -600; // Damped to ±300 px/s² for fine steering
 
-                this.vy += ay * dt;
-                this.vy *= Math.exp(-this.dragCoeff * dt);
-                this.player.y += this.vy * dt;
+                this.vy += ay * physDt;
+                this.vy *= Math.exp(-this.dragCoeff * physDt);
+                this.player.y += this.vy * physDt;
             }
 
             // Strict position-clamping for Autopilot to guarantee 100% no silt-outs
@@ -464,7 +473,7 @@ class ScubaFlowScene extends Phaser.Scene {
                 }
 
                 // Update vy post-clamp for visual/audio effects
-                this.vy = (this.player.y - lastY) / dt;
+                this.vy = (this.player.y - lastY) / physDt;
             }
 
             // 4. Cave Boundaries & Local Energy Calculation
@@ -606,7 +615,7 @@ class ScubaFlowScene extends Phaser.Scene {
                     this.buddyState = 'clearing';
                     this.buddyStateTimer = 1800; // Delay for particles to clear
                 } else if (this.buddyState === 'clearing') {
-                    this.buddyStateTimer -= delta;
+                    this.buddyStateTimer -= deltaMs;
                     if (this.buddyStateTimer <= 0) {
                         this.buddyState = 'relieved';
                         this.buddyStateTimer = 2000;
@@ -615,7 +624,7 @@ class ScubaFlowScene extends Phaser.Scene {
                         this.playerBubble.setVisible(true);
                     }
                 } else if (this.buddyState === 'relieved') {
-                    this.buddyStateTimer -= delta;
+                    this.buddyStateTimer -= deltaMs;
                     if (this.buddyStateTimer <= 0) {
                         this.buddyState = 'normal';
                         this.buddyBubble.setVisible(false);
@@ -631,11 +640,11 @@ class ScubaFlowScene extends Phaser.Scene {
             } else {
                 this.buddy.scaleX = 1;  // Face forward
             }
-            this.buddy.x = Phaser.Math.Linear(this.buddy.x, targetBuddyX, 1 - Math.exp(-2.0 * dt));
+            this.buddy.x = Phaser.Math.Linear(this.buddy.x, targetBuddyX, 1 - Math.exp(-2.0 * physDt));
 
             let buddyLeadTime = this.elapsedTime + (this.buddy.x - this.player.x) / this.baseScrollSpeed * 1000;
             let buddyTargetY = this.getTargetYAtTime(buddyLeadTime);
-            this.buddy.y = Phaser.Math.Linear(this.buddy.y, buddyTargetY, 1 - Math.exp(-4 * dt));
+            this.buddy.y = Phaser.Math.Linear(this.buddy.y, buddyTargetY, 1 - Math.exp(-4 * physDt));
 
             // Clamp buddy tightly to safety zone borders so buddy never touches wall or raises sediment
             let scaleX = this.buddy.scaleX || 1;
@@ -673,18 +682,18 @@ class ScubaFlowScene extends Phaser.Scene {
 
             // 8. Silt Recovery timer & Scroll Speed Slowdown
             if (this.siltActive) {
-                this.siltTime -= delta;
+                this.siltTime -= deltaMs;
                 if (this.siltTime <= 0) {
                     this.siltActive = false;
                 }
-                this.scrollSpeed = Phaser.Math.Linear(this.scrollSpeed, this.baseScrollSpeed * 0.72, dt * 3); // less punishing slowdown
+                this.scrollSpeed = Phaser.Math.Linear(this.scrollSpeed, this.baseScrollSpeed * 0.72, physDt * 3); // less punishing slowdown
             } else {
-                this.scrollSpeed = Phaser.Math.Linear(this.scrollSpeed, this.baseScrollSpeed, dt * 2.5);
+                this.scrollSpeed = Phaser.Math.Linear(this.scrollSpeed, this.baseScrollSpeed, physDt * 2.5);
             }
 
             // Score multiplier logic (avoiding silt-outs increases multiplier dynamically)
             if (!this.siltActive) {
-                this.siltFreeTime += delta;
+                this.siltFreeTime += deltaMs;
                 let nextMilestone = this.flowMilestoneInterval || 10000;
                 if (this.siltFreeTime >= nextMilestone) {
                     this.siltFreeTime = 0;
@@ -2632,6 +2641,7 @@ class ScubaFlowScene extends Phaser.Scene {
         this.musicSource.connect(this.musicGain);
         this.musicGain.connect(this.musicFilter);
         this.musicFilter.connect(this.masterGain);
+        this.musicStartTime = ctx.currentTime;
         this.musicSource.start(0);
 
         const sampleRate = ctx.sampleRate;
