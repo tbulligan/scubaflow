@@ -18,8 +18,6 @@ The repository code is the absolute source of truth:
 - [LICENSE](file:///home/tomaso/projects/scubaflow/LICENSE): Open-source license file pointing to tomaso.bulligan.com.
 - [.agents/ponytail.md](file:///home/tomaso/projects/scubaflow/.agents/ponytail.md): Defines the Ponytail Philosophy.
 
-*Note: Legacy references such as `level1.json` or the reference music track "Dirt" are obsolete.*
-
 ---
 
 ## 2. Core Game Architecture & Systems
