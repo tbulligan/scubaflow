@@ -322,34 +322,31 @@ class ScubaFlowScene extends Phaser.Scene {
 
             // 2. Process Input & Buoyancy State
             if (this.useAutopilot) {
-                // Autopilot target calculation: find nearest active debris ahead of player
+                // Autopilot target calculation: find weighted average Y of centerline and upcoming collectibles
                 let px = this.player.x;
                 let timeAtPlayer = (px / this.baseScrollSpeed) * 1000;
                 let pPathY = this.getTargetYAtTime(timeAtPlayer);
                 let targetY = pPathY;
 
-                let lookAheadDistance = 400; // px
-                let nearestCollectible = null;
-                let minDistanceX = Infinity;
+                let lookAheadStart = 20; // px
+                let lookAheadEnd = 300; // px
+                let totalWeight = 1.0;
+                let weightedY = pPathY * 1.0; // Base weight on centerline path
 
                 if (this.collectiblesGroup && this.collectiblesGroup.children) {
                     this.collectiblesGroup.children.iterate((debris) => {
                         if (debris && debris.active) {
                             let dx = debris.x - px;
-                            // Target collectibles at least 25px ahead to allow smooth steering lead-time
-                            if (dx > 25 && dx < lookAheadDistance) {
-                                if (dx < minDistanceX) {
-                                    minDistanceX = dx;
-                                    nearestCollectible = debris;
-                                }
+                            if (dx > lookAheadStart && dx < lookAheadEnd) {
+                                // Weight decreases linearly with distance
+                                let weight = (lookAheadEnd - dx) / (lookAheadEnd - lookAheadStart);
+                                weightedY += debris.y * weight * 1.5;
+                                totalWeight += weight * 1.5;
                             }
                         }
                     });
                 }
-
-                if (nearestCollectible) {
-                    targetY = nearestCollectible.y;
-                }
+                targetY = weightedY / totalWeight;
 
                 // Calculate safe zone corridor boundaries using player checkpoints to guarantee no silt-outs
                 let minYAllowed = -9999;
@@ -380,10 +377,24 @@ class ScubaFlowScene extends Phaser.Scene {
 
                 // PD controller deciding whether to simulate spaceDown (inhale) with hysteresis to prevent chattering/jerkiness
                 let errorY = targetY - this.player.y;
-                let controlSignal = -errorY * 0.015 + this.vy * 0.006;
-                if (controlSignal > 0.25) {
+                let controlSignal = -errorY * 0.018 + this.vy * 0.008;
+
+                // Wall avoidance potential field forces to naturally steer away from ceiling/floor early
+                let ceilDist = this.player.y - minYAllowed;
+                let floorDist = maxYAllowed - this.player.y;
+                let avoidanceThreshold = 35; // start avoiding when 35px from wall
+                let avoidanceWeight = 0.015;
+
+                if (ceilDist < avoidanceThreshold && ceilDist > 0) {
+                    controlSignal -= (avoidanceThreshold - ceilDist) * avoidanceWeight;
+                }
+                if (floorDist < avoidanceThreshold && floorDist > 0) {
+                    controlSignal += (avoidanceThreshold - floorDist) * avoidanceWeight;
+                }
+
+                if (controlSignal > 0.20) {
                     this.simulatedSpaceDown = true;
-                } else if (controlSignal < -0.25) {
+                } else if (controlSignal < -0.20) {
                     this.simulatedSpaceDown = false;
                 }
             }
@@ -471,9 +482,16 @@ class ScubaFlowScene extends Phaser.Scene {
                 }
 
                 if (minYAllowed <= maxYAllowed) {
-                    this.player.y = Phaser.Math.Clamp(this.player.y, minYAllowed, maxYAllowed);
+                    if (this.player.y < minYAllowed) {
+                        this.player.y = minYAllowed;
+                        if (this.vy < 0) this.vy = 0; // absorb velocity to prevent bounce
+                    } else if (this.player.y > maxYAllowed) {
+                        this.player.y = maxYAllowed;
+                        if (this.vy > 0) this.vy = 0; // absorb velocity to prevent bounce
+                    }
                 } else {
                     this.player.y = (minYAllowed + maxYAllowed) / 2;
+                    this.vy = 0;
                 }
 
                 // Update vy post-clamp for visual/audio effects
