@@ -350,10 +350,10 @@ class ScubaFlowScene extends Phaser.Scene {
                     targetY = nearestCollectible.y;
                 }
 
-                // Clamp targetY to safe zone corridor using player checkpoints to guarantee no silt-outs
+                // Calculate safe zone corridor boundaries using player checkpoints to guarantee no silt-outs
                 let minYAllowed = -9999;
                 let maxYAllowed = 9999;
-                let safetyMargin = 12; // safe buffer
+                let safetyMargin = 12; // 12px safe clearance buffer
 
                 for (let pt of checkPoints) {
                     let wx = px + pt.x;
@@ -372,27 +372,36 @@ class ScubaFlowScene extends Phaser.Scene {
                     }
                 }
 
+                // Clamp targetY inside the corridor so we don't try to steer past walls
                 if (minYAllowed <= maxYAllowed) {
                     targetY = Phaser.Math.Clamp(targetY, minYAllowed, maxYAllowed);
                 }
 
-                // Glide towards target
-                this.player.y = Phaser.Math.Linear(this.player.y, targetY, 1 - Math.exp(-8 * dt));
+                // Proportional-Derivative (PD) controller to calculate target V_lung organically
+                let errorY = targetY - this.player.y;
+                let targetV = 0.5 - (errorY * 0.015 - this.vy * 0.005);
+                this.V_lung = Phaser.Math.Clamp(targetV, 0.0, 1.0);
 
-                // Maintain vy for visual effects
+                // Run standard buoyancy physics simulation to keep movement organic and flowing
+                this.buoyancySmooth += (this.V_lung - this.buoyancySmooth) * dt * 4.5;
+                let ay = (this.buoyancySmooth - 0.5) * -600;
+
+                this.vy += ay * dt;
+                this.vy *= Math.exp(-this.dragCoeff * dt);
+                this.player.y += this.vy * dt;
+
+                // Directly clamp the final player position to safe boundaries to prevent any silt-outs
+                if (minYAllowed <= maxYAllowed) {
+                    this.player.y = Phaser.Math.Clamp(this.player.y, minYAllowed, maxYAllowed);
+                } else {
+                    this.player.y = (minYAllowed + maxYAllowed) / 2;
+                }
+
+                // Update vy post-clamp for visual/audio effects
                 this.vy = (this.player.y - lastY) / dt;
 
-                // Sync simulated input and lung volume V_lung for chest expansion & breathing audio
-                let desiredV = 0.5;
-                if (targetY < this.player.y - 2) {
-                    desiredV = 1.0; // rising
-                } else if (targetY > this.player.y + 2) {
-                    desiredV = 0.0; // sinking
-                }
-                this.V_lung += (desiredV - this.V_lung) * dt * 5;
-                this.V_lung = Phaser.Math.Clamp(this.V_lung, 0, 1);
-
-                this.simulatedSpaceDown = (desiredV === 1.0);
+                // Sync simulated input state for bubbles and sound triggers
+                this.simulatedSpaceDown = (this.V_lung > 0.5);
             } else {
                 let fillRate = 3.0;
                 if (this.spaceKey.isDown) {
