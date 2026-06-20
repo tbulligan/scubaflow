@@ -3095,9 +3095,11 @@ class ScubaFlowScene extends Phaser.Scene {
 
             if (timeMs < 8000 || timeMs > levelLengthMs - 4000) continue;
 
-            if (rawEnergy[i] > rawEnergy[i - 1] && rawEnergy[i] > rawEnergy[i + 1]) {
-                if (rawEnergy[i] > maxRawEnergy * 0.22) {
-                    if (timeMs - lastColTime >= spacerTime) {
+            let isPeak = (rawEnergy[i] > rawEnergy[i - 1] && rawEnergy[i] > rawEnergy[i + 1]) && (rawEnergy[i] > maxRawEnergy * 0.22);
+            let forceSpawn = (timeMs - lastColTime >= 4500);
+
+            if (isPeak || forceSpawn) {
+                if (timeMs - lastColTime >= spacerTime) {
                         let norm = smoothedEnergy[i] / maxEnergy;
                         let pathIndex = Math.min(path.length - 1, Math.floor(timeMs / (windowSec * 1000)));
                         let pathY = path[pathIndex].y;
@@ -3138,7 +3140,6 @@ class ScubaFlowScene extends Phaser.Scene {
                         lastColTime = timeMs + 1800;
                     }
                 }
-            }
         }
 
         let zoneNames = ["Neon Reef", "Gold Ridge", "Magenta Arch", "Abyssal Trench", "Cyan Ascent"];
@@ -3309,6 +3310,45 @@ class ScubaFlowScene extends Phaser.Scene {
         let testMaxYAllowed = 500;
         let testClamped = Phaser.Math.Clamp(testPathY, testMinYAllowed, testMaxYAllowed);
         console.assert(testClamped === 300, `Assertion Failed: Autopilot clamping logic failed: expected 300, got ${testClamped}`);
+
+        // Test 7: Procedural level generator force-spawns on silent tracks
+        let mockAudio = {
+            duration: 30, // 30 seconds
+            sampleRate: 44100,
+            getChannelData: () => new Float32Array(44100 * 30) // Silent track
+        };
+        let originalLevelData = this.levelData;
+        let originalTotalCollectibles = this.totalCollectibles;
+        let originalFlowMilestoneInterval = this.flowMilestoneInterval;
+        let originalMaxPotentialPoints = this.maxPotentialPoints;
+        let originalBaseScrollSpeed = this.baseScrollSpeed;
+        let originalScrollSpeed = this.scrollSpeed;
+        let originalClusterTotals = this.clusterTotals;
+        let originalClusterCollected = this.clusterCollected;
+
+        this.generateProceduralLevel(mockAudio);
+
+        // Verify collectibles generated on silent track
+        console.assert(this.levelData.collectibles.length > 0, `Assertion Failed: Silent tracks must still generate collectibles to avoid empty tunnels`);
+        
+        // Check maximum gap between collectibles in the playable region (8s to duration - 4s)
+        let sortedCols = [...this.levelData.collectibles].sort((a, b) => a.time - b.time);
+        let lastTime = 8000;
+        for (let col of sortedCols) {
+            let gap = col.time - lastTime;
+            console.assert(gap <= 6800, `Assertion Failed: Large gap between collectibles detected: ${gap}ms`);
+            lastTime = col.time;
+        }
+
+        // Restore original state
+        this.levelData = originalLevelData;
+        this.totalCollectibles = originalTotalCollectibles;
+        this.flowMilestoneInterval = originalFlowMilestoneInterval;
+        this.maxPotentialPoints = originalMaxPotentialPoints;
+        this.baseScrollSpeed = originalBaseScrollSpeed;
+        this.scrollSpeed = originalScrollSpeed;
+        this.clusterTotals = originalClusterTotals;
+        this.clusterCollected = originalClusterCollected;
 
         console.log("=== DIAGNOSTICS PASSED: ALL CONTROLS FUNCTIONAL ===");
     }
