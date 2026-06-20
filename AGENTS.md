@@ -53,8 +53,9 @@ The repository code is the absolute source of truth:
   - This guarantees that all generated sloping tunnels are navigable and that all procedural collectibles (spanned up to $40\text{px}$ offset) are mathematically attainable.
 
 ### End of Dive Sequence
-- Upon reaching the end of the song path (`player.x >= targetEndX` where `targetEndX = 250 + (songLengthMs / 1000) * baseScrollSpeed`) or when the Web Audio track finishes playing (`musicSource.onended` as a fallback), the game initiates a 2-second fadeout sequence before displaying the final results card.
-- The `musicSource.onended` handler is critical for handling cases where the browser window/tab is not in focus (e.g., during Autopilot/Music Visualizer mode) and the Phaser update loop is throttled or paused by the browser.
+- The level completion requires the player to reach the end of the cave path (`player.x >= targetEndX` where `targetEndX = 250 + (songLengthMs / 1000) * baseScrollSpeed`) and the Web Audio track to finish playing (`musicSource.onended` or time-based completion).
+  - **Decoupled End Timing:** If the player finishes early (e.g., in a clean run), they are clamped at the end of the cave while the music completes naturally. If the music finishes first (e.g., due to scroll speed slowdowns from wall bumps), the player is allowed to continue playing and navigate to the end of the cave before ending the level.
+- The `musicSource.onended` handler is critical for marking the audio as complete, especially when the browser window/tab is out of focus (e.g., during Autopilot/Music Visualizer mode) and the Phaser update loop is throttled.
 - A redundant `setTimeout` fallback is used in `startFadeout` alongside Phaser's clock-based `time.delayedCall` to ensure the HTML results card is successfully rendered in the DOM even when the window is blurred.
 - During this transition, the camera fades out to `#020514` and the Web Audio API master gain exponentially ramps down to `0.0001`, while all regular gameplay systems (including collision detection and collectible collecting) remain fully active.
 

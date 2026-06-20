@@ -63,6 +63,8 @@ class ScubaFlowScene extends Phaser.Scene {
         this.clusterCollected = {};
         this.isFadingOut = false;
         this.isLevelCompleted = false;
+        this.musicCompleted = false;
+        this.targetEndX = 0;
     }
 
     preload() {
@@ -89,6 +91,7 @@ class ScubaFlowScene extends Phaser.Scene {
         this.totalCollectibles = 0;
         this.lastProcessedBeatIdx = -1;
         this.beatRipples = [];
+        this.targetEndX = (this.levelData.songLengthMs / 1000) * this.baseScrollSpeed + 250;
 
         // Retrieve avatar selection from global scope
         this.avatarType = window.selectedAvatar || 'diver';
@@ -388,10 +391,10 @@ class ScubaFlowScene extends Phaser.Scene {
             let deltaMs = dt * 1000;
             let physDt = Math.min(dt, 0.15); // cap physics step to prevent physics engine explosions
 
-            // Ensure we stop when music/level completes
-            let targetEndX = (this.levelData.songLengthMs / 1000) * this.baseScrollSpeed + 250;
-            if (this.player.x >= targetEndX) {
-                if (!this.isFadingOut) {
+            // Clamp player X position at targetEndX and wait for music to finish
+            if (this.player.x >= this.targetEndX) {
+                this.player.x = this.targetEndX;
+                if ((this.musicCompleted || this.elapsedTime >= this.levelData.songLengthMs) && !this.isFadingOut) {
                     this.startFadeout();
                 }
             }
@@ -2594,7 +2597,7 @@ class ScubaFlowScene extends Phaser.Scene {
 
         // Dynamically scale silt-out duration based on impact speed (absolute vy)
         let impactSpeed = Math.abs(impactVy);
-        let scale = Phaser.Math.Clamp(impactSpeed / 200, 0.44, 1.33); // range: ~0.8s to ~2.4s
+        let scale = Phaser.Math.Clamp(impactSpeed / 70, 0.44, 1.33); // range: ~0.8s to ~2.4s
         
         // Scale duration inversely with level scroll speed to keep blind travel distance consistent
         let speedFactor = 50 / this.baseScrollSpeed;
@@ -2792,7 +2795,8 @@ class ScubaFlowScene extends Phaser.Scene {
 
         this.musicSource.onended = () => {
             console.log("musicSource onended fired");
-            if (!this.isFadingOut && !this.isLevelCompleted) {
+            this.musicCompleted = true;
+            if (this.player.x >= this.targetEndX && !this.isFadingOut && !this.isLevelCompleted) {
                 this.startFadeout();
             }
         };
@@ -3364,6 +3368,7 @@ class ScubaFlowScene extends Phaser.Scene {
         this.totalCollectibles = collectibles.filter(c => c.time <= songLengthMs).length;
         this.flowMilestoneInterval = Math.max(6000, Math.min(15000, songLengthMs / 15));
         this.maxPotentialPoints = this.calculateMaxPotentialPoints();
+        this.targetEndX = (songLengthMs / 1000) * this.baseScrollSpeed + 250;
 
         console.log(`Procedural Level Generated! Beats: ${beats.length}, Collectibles: ${this.totalCollectibles}`);
     }
