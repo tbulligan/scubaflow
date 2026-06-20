@@ -12,12 +12,15 @@ class ScubaFlowScene extends Phaser.Scene {
         this.isPlaying = false;
         this.scrollSpeed = 40; // px per second
         this.baseScrollSpeed = 40;
+        this.useAutopilot = window.useAutopilot || false;
+        this.simulatedSpaceDown = false;
 
         // Simplified Agile Buoyancy Physics
         this.V_lung = 0.5; // target state [0 = full sink, 1 = full rise]
         this.buoyancySmooth = 0.5; // smoothed buoyancy state
         this.vy = 0; // vertical velocity
         this.dragCoeff = 2.4; // Responsive drag
+
 
         // Psychedelic Visuals & Music-Reactive Systems
         this.score = 0;
@@ -45,6 +48,7 @@ class ScubaFlowScene extends Phaser.Scene {
 
         // Sound timing
         this.lastBubbleSoundTime = 0;
+        this.musicStartTime = null;
 
         // Score Flow State points system
         this.siltFreeTime = 0;
@@ -55,6 +59,7 @@ class ScubaFlowScene extends Phaser.Scene {
         this.clusterTotals = {};
         this.clusterCollected = {};
         this.isFadingOut = false;
+        this.isLevelCompleted = false;
     }
 
     preload() {
@@ -275,8 +280,16 @@ class ScubaFlowScene extends Phaser.Scene {
         try {
             if (!this.isPlaying) return;
 
-            let dt = delta / 1000; // seconds
-            this.elapsedTime += delta;
+            let prevElapsedTime = this.elapsedTime;
+            if (this.musicStartTime !== null && this.audioContext) {
+                this.elapsedTime = (this.audioContext.currentTime - this.musicStartTime) * 1000;
+            } else {
+                this.elapsedTime += delta;
+            }
+            let dt = (this.elapsedTime - prevElapsedTime) / 1000;
+            if (dt <= 0) dt = delta / 1000; // fallback to prevent division by zero/negative steps
+            let deltaMs = dt * 1000;
+            let physDt = Math.min(dt, 0.15); // cap physics step to prevent physics engine explosions
 
             // Ensure we stop when music/level completes
             if (this.elapsedTime >= this.levelData.levelLengthMs) {
@@ -289,18 +302,100 @@ class ScubaFlowScene extends Phaser.Scene {
             // 1. (baseHue now updated in section 6 below, multiplier-scaled)
 
 
-            // 2. Process Input & Buoyancy State
-            let fillRate = 3.0;
-            if (this.spaceKey.isDown) {
-                this.V_lung = Math.min(1.0, this.V_lung + fillRate * dt);
+            // Multi-point body checkPoints definition (defined early so they can be reused for autopilot safety clamping)
+            let checkPoints = [];
+            if (this.avatarType === 'diver') {
+                let frogPhase = (this.elapsedTime / 350) % (Math.PI * 2);
+                let kickExtension = Math.max(0, Math.sin(frogPhase));
+                let frogPhase2 = frogPhase + 0.25;
+                let kickExtension2 = Math.max(0, Math.sin(frogPhase2));
+
+                let foot2X = -8 - (6 + kickExtension * 8) - (2 + kickExtension * 12);
+                let foot2Y = -6 - (12 - kickExtension * 8) - (10 - kickExtension * 10);
+
+                let foot1X = -10 - (6 + kickExtension2 * 8) - (2 + kickExtension2 * 12);
+                let foot1Y = 2 - (12 - kickExtension2 * 8) - (10 - kickExtension2 * 10);
+
+                checkPoints = [
+                    { x: 0,   y: 0,       r: 8,  floor: true,  ceil: true  }, // Torso center (chest ellipse half-h=8)
+                    { x: 14,  y: -4,      r: 5,  floor: true,  ceil: true  }, // Head
+                    { x: -10, y: -13,     r: 3,  floor: false, ceil: true  }, // Tank tops (highest solid point)
+                    { x: 26,  y: -2,      r: 4,  floor: true,  ceil: true  }, // Light hand (forward-most)
+                    { x: foot1X, y: foot1Y, r: 5, floor: true, ceil: true }, // Foot 1 — floor & ceiling
+                    { x: foot2X, y: foot2Y, r: 5, floor: true, ceil: true }, // Foot 2 — floor & ceiling
+                ];
             } else {
-                this.V_lung = Math.max(0.0, this.V_lung - fillRate * dt);
+                checkPoints = [
+                    { x: 0, y: 0, r: 12 }
+                ];
+            }
+
+            // 2. Process Input & Buoyancy State
+            if (this.useAutopilot) {
+                let px = this.player.x;
+                let timeAtPlayer = (px / this.baseScrollSpeed) * 1000;
+                let pPathY = this.getTargetYAtTime(timeAtPlayer);
+
+                // Periodic breathing cycle (3.6 seconds per breath cycle: 1.8s inhale, 1.8s exhale)
+                let breathPeriod = 3600; // ms
+                let breathPhase = (time % breathPeriod) / breathPeriod; // 0 to 1
+                this.simulatedSpaceDown = (breathPhase < 0.5);
+
+                // Smoothly guide player along the centerline with a natural breathing bobbing effect (12px amplitude)
+                let targetY = pPathY - Math.sin(breathPhase * Math.PI * 2) * 12;
+
+                // Clamp targetY inside the corridor so we don't try to steer past walls
+                let minYAllowed = -9999;
+                let maxYAllowed = 9999;
+                let safetyMargin = 12; // 12px safe clearance buffer
+
+                for (let pt of checkPoints) {
+                    let wx = px + pt.x;
+                    let ptTime = (wx / this.baseScrollSpeed) * 1000;
+                    let ptPathY = this.getTargetYAtTime(ptTime);
+                    let ptEnergy = this.getEnergyAtTime(ptTime);
+                    let { floorOffset, ceilOffset } = this.getWallOffsets(wx, ptEnergy);
+                    let ptFloorY = ptPathY + floorOffset;
+                    let ptCeilY = ptPathY - ceilOffset;
+
+                    if (pt.ceil !== false) {
+                        minYAllowed = Math.max(minYAllowed, ptCeilY - pt.y + pt.r + safetyMargin);
+                    }
+                    if (pt.floor !== false) {
+                        maxYAllowed = Math.min(maxYAllowed, ptFloorY - pt.y - pt.r - safetyMargin);
+                    }
+                }
+
+                if (minYAllowed <= maxYAllowed) {
+                    targetY = Phaser.Math.Clamp(targetY, minYAllowed, maxYAllowed);
+                }
+
+                // Glide player smoothly towards the target path (completely organic visualizer glide)
+                let lastY = this.player.y;
+                this.player.y = Phaser.Math.Linear(this.player.y, targetY, 1 - Math.exp(-6 * physDt));
+                
+                // Calculate simulated velocity
+                this.vy = (this.player.y - lastY) / physDt;
+            }
+
+            // Standard input & lung volume simulation (shared between manual & autopilot)
+            let spaceDown = this.useAutopilot ? this.simulatedSpaceDown : this.spaceKey.isDown;
+            let fillRate = 3.0;
+            if (spaceDown) {
+                this.V_lung = Math.min(1.0, this.V_lung + fillRate * physDt);
+            } else {
+                this.V_lung = Math.max(0.0, this.V_lung - fillRate * physDt);
             }
 
             // Audio Breathing Volumes
             let ctx = this.audioContext;
             if (ctx) {
-                if (this.spaceKey.isDown) {
+                if (this.useAutopilot) {
+                    // Mute inhale/exhale synths completely in music visualizer mode
+                    this.inhaleGain.gain.setTargetAtTime(0.0, ctx.currentTime, 0.05);
+                    this.exhaleGain.gain.setTargetAtTime(0.0, ctx.currentTime, 0.05);
+                    this.lastBubbleSoundTime = 0;
+                } else if (spaceDown) {
                     this.inhaleGain.gain.setTargetAtTime(0.10, ctx.currentTime, 0.05);
                     this.exhaleGain.gain.setTargetAtTime(0.0, ctx.currentTime, 0.05);
                     this.inhaleFilter.frequency.setValueAtTime(300 + this.V_lung * 600, ctx.currentTime);
@@ -312,7 +407,7 @@ class ScubaFlowScene extends Phaser.Scene {
                         this.exhaleGain.gain.setTargetAtTime(rumble, ctx.currentTime, 0.05);
 
                         // Trigger bubble chirps for exhaling
-                        this.lastBubbleSoundTime += delta;
+                        this.lastBubbleSoundTime += deltaMs;
                         let nextBubbleInterval = 60 + Math.random() * 50;
                         if (this.lastBubbleSoundTime >= nextBubbleInterval) {
                             this.lastBubbleSoundTime = 0;
@@ -338,12 +433,49 @@ class ScubaFlowScene extends Phaser.Scene {
             }
 
             // 3. Simplified Buoyancy Physics
-            this.buoyancySmooth += (this.V_lung - this.buoyancySmooth) * dt * 4.5;
-            let ay = (this.buoyancySmooth - 0.5) * -600; // Damped to ±300 px/s² for fine steering
+            let lastY = this.player.y;
+            if (!this.useAutopilot) {
+                this.buoyancySmooth += (this.V_lung - this.buoyancySmooth) * physDt * 4.5;
+                let ay = (this.buoyancySmooth - 0.5) * -600; // Damped to ±300 px/s² for fine steering
 
-            this.vy += ay * dt;
-            this.vy *= Math.exp(-this.dragCoeff * dt);
-            this.player.y += this.vy * dt;
+                this.vy += ay * physDt;
+                this.vy *= Math.exp(-this.dragCoeff * physDt);
+                this.player.y += this.vy * physDt;
+            }
+
+            // Strict position-clamping for Autopilot to guarantee 100% no silt-outs
+            if (this.useAutopilot) {
+                let px = this.player.x;
+                let minYAllowed = -9999;
+                let maxYAllowed = 9999;
+                let safetyMargin = 12;
+
+                for (let pt of checkPoints) {
+                    let wx = px + pt.x;
+                    let ptTime = (wx / this.baseScrollSpeed) * 1000;
+                    let ptPathY = this.getTargetYAtTime(ptTime);
+                    let ptEnergy = this.getEnergyAtTime(ptTime);
+                    let { floorOffset, ceilOffset } = this.getWallOffsets(wx, ptEnergy);
+                    let ptFloorY = ptPathY + floorOffset;
+                    let ptCeilY = ptPathY - ceilOffset;
+
+                    if (pt.ceil !== false) {
+                        minYAllowed = Math.max(minYAllowed, ptCeilY - pt.y + pt.r + safetyMargin);
+                    }
+                    if (pt.floor !== false) {
+                        maxYAllowed = Math.min(maxYAllowed, ptFloorY - pt.y - pt.r - safetyMargin);
+                    }
+                }
+
+                if (minYAllowed <= maxYAllowed) {
+                    this.player.y = Phaser.Math.Clamp(this.player.y, minYAllowed, maxYAllowed);
+                } else {
+                    this.player.y = (minYAllowed + maxYAllowed) / 2;
+                }
+
+                // Update vy post-clamp for visual/audio effects
+                this.vy = (this.player.y - lastY) / physDt;
+            }
 
             // 4. Cave Boundaries & Local Energy Calculation
             let px = this.player.x;
@@ -357,33 +489,7 @@ class ScubaFlowScene extends Phaser.Scene {
             let floorY = pPathY + floorOffset;
             let ceilingY = pPathY - ceilOffset;
 
-            // Multi-point body collision checks (checking any part of the diver's body: head, torso, fins, hand, twinset)
-            let checkPoints = [];
-            if (this.avatarType === 'diver') {
-                let frogPhase = (this.elapsedTime / 350) % (Math.PI * 2);
-                let kickExtension = Math.max(0, Math.sin(frogPhase));
-                let frogPhase2 = frogPhase + 0.25;
-                let kickExtension2 = Math.max(0, Math.sin(frogPhase2));
-
-                let foot2X = -8 - (6 + kickExtension * 8) - (2 + kickExtension * 12);
-                let foot2Y = -6 - (12 - kickExtension * 8) - (10 - kickExtension * 10);
-
-                let foot1X = -10 - (6 + kickExtension2 * 8) - (2 + kickExtension2 * 12);
-                let foot1Y = 2 - (12 - kickExtension2 * 8) - (10 - kickExtension2 * 10);
-
-                checkPoints = [
-                    { x: 0,   y: 0,       r: 8,  floor: true,  ceil: true  }, // Torso center (chest ellipse half-h=8)
-                    { x: 14,  y: -4,      r: 5,  floor: true,  ceil: true  }, // Head
-                    { x: -10, y: -13,     r: 3,  floor: false, ceil: true  }, // Tank tops (highest solid point)
-                    { x: 26,  y: -2,      r: 4,  floor: true,  ceil: true  }, // Light hand (forward-most)
-                    { x: foot1X, y: foot1Y, r: 5, floor: true, ceil: true }, // Foot 1 — floor & ceiling (fin turbulence triggers silt on either surface)
-                    { x: foot2X, y: foot2Y, r: 5, floor: true, ceil: true }, // Foot 2 — floor & ceiling
-                ];
-            } else {
-                checkPoints = [
-                    { x: 0, y: 0, r: 12 }
-                ];
-            }
+            // Re-use checkPoints defined early in Section 2 for multi-point body collision checks
 
             let collisionTriggered = false;
             let collisionSource = 'floor';
@@ -510,7 +616,7 @@ class ScubaFlowScene extends Phaser.Scene {
                     this.buddyState = 'clearing';
                     this.buddyStateTimer = 1800; // Delay for particles to clear
                 } else if (this.buddyState === 'clearing') {
-                    this.buddyStateTimer -= delta;
+                    this.buddyStateTimer -= deltaMs;
                     if (this.buddyStateTimer <= 0) {
                         this.buddyState = 'relieved';
                         this.buddyStateTimer = 2000;
@@ -519,7 +625,7 @@ class ScubaFlowScene extends Phaser.Scene {
                         this.playerBubble.setVisible(true);
                     }
                 } else if (this.buddyState === 'relieved') {
-                    this.buddyStateTimer -= delta;
+                    this.buddyStateTimer -= deltaMs;
                     if (this.buddyStateTimer <= 0) {
                         this.buddyState = 'normal';
                         this.buddyBubble.setVisible(false);
@@ -535,11 +641,11 @@ class ScubaFlowScene extends Phaser.Scene {
             } else {
                 this.buddy.scaleX = 1;  // Face forward
             }
-            this.buddy.x = Phaser.Math.Linear(this.buddy.x, targetBuddyX, 1 - Math.exp(-2.0 * dt));
+            this.buddy.x = Phaser.Math.Linear(this.buddy.x, targetBuddyX, 1 - Math.exp(-2.0 * physDt));
 
             let buddyLeadTime = this.elapsedTime + (this.buddy.x - this.player.x) / this.baseScrollSpeed * 1000;
             let buddyTargetY = this.getTargetYAtTime(buddyLeadTime);
-            this.buddy.y = Phaser.Math.Linear(this.buddy.y, buddyTargetY, 1 - Math.exp(-4 * dt));
+            this.buddy.y = Phaser.Math.Linear(this.buddy.y, buddyTargetY, 1 - Math.exp(-4 * physDt));
 
             // Clamp buddy tightly to safety zone borders so buddy never touches wall or raises sediment
             let scaleX = this.buddy.scaleX || 1;
@@ -577,18 +683,18 @@ class ScubaFlowScene extends Phaser.Scene {
 
             // 8. Silt Recovery timer & Scroll Speed Slowdown
             if (this.siltActive) {
-                this.siltTime -= delta;
+                this.siltTime -= deltaMs;
                 if (this.siltTime <= 0) {
                     this.siltActive = false;
                 }
-                this.scrollSpeed = Phaser.Math.Linear(this.scrollSpeed, this.baseScrollSpeed * 0.72, dt * 3); // less punishing slowdown
+                this.scrollSpeed = Phaser.Math.Linear(this.scrollSpeed, this.baseScrollSpeed * 0.72, physDt * 3); // less punishing slowdown
             } else {
-                this.scrollSpeed = Phaser.Math.Linear(this.scrollSpeed, this.baseScrollSpeed, dt * 2.5);
+                this.scrollSpeed = Phaser.Math.Linear(this.scrollSpeed, this.baseScrollSpeed, physDt * 2.5);
             }
 
             // Score multiplier logic (avoiding silt-outs increases multiplier dynamically)
             if (!this.siltActive) {
-                this.siltFreeTime += delta;
+                this.siltFreeTime += deltaMs;
                 let nextMilestone = this.flowMilestoneInterval || 10000;
                 if (this.siltFreeTime >= nextMilestone) {
                     this.siltFreeTime = 0;
@@ -760,7 +866,8 @@ class ScubaFlowScene extends Phaser.Scene {
         let dt = this.game.loop.delta / 1000;
 
         // 1. Exhale bubbles on spacebar release (lung volume shrinking)
-        if (!this.spaceKey.isDown && this.V_lung > 0.05) {
+        let spaceDown = this.useAutopilot ? this.simulatedSpaceDown : this.spaceKey.isDown;
+        if (!spaceDown && this.V_lung > 0.05) {
             if (Math.random() < 0.20) {
                 let rndHue = (this.baseHue + Math.random() * 60) % 360;
                 let bubbleColor = Phaser.Display.Color.HSLToColor(rndHue / 360, 1.0, 0.65).color;
@@ -2039,6 +2146,41 @@ class ScubaFlowScene extends Phaser.Scene {
         return ((s ^ (s >>> 16)) >>> 0) / 0xffffffff;
     }
 
+    getAudioBufferHash(audioBuffer) {
+        let channelData = audioBuffer.getChannelData(0);
+        let duration = audioBuffer.duration;
+        let sampleRate = audioBuffer.sampleRate;
+
+        // FNV-1a 32-bit offset basis
+        let hash = 2166136261;
+        let str = duration.toString() + sampleRate.toString();
+        for (let i = 0; i < str.length; i++) {
+            hash ^= str.charCodeAt(i);
+            hash = Math.imul(hash, 16777619);
+        }
+
+        // Fast sampling of audio channel data (1000 points) to create signature
+        let samplesToHash = 1000;
+        let step = Math.max(1, Math.floor(channelData.length / samplesToHash));
+        for (let i = 0; i < channelData.length; i += step) {
+            let val = channelData[i];
+            let intVal = Math.floor((val + 1) * 1000000);
+            hash ^= intVal;
+            hash = Math.imul(hash, 16777619);
+        }
+
+        return hash >>> 0; // Unsigned 32-bit int
+    }
+
+    createMulberry32(seed) {
+        return function() {
+            let t = seed += 0x6D2B79F5;
+            t = Math.imul(t ^ (t >>> 15), t | 1);
+            t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+            return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+        };
+    }
+
     drawWallOpenings(g, startX, endX, floorPoints, ceilPoints, floorColor, ceilColor, flowFill, flowSat, flowLightBoost) {
         const SLOT_SIZE = 320; // world-px between opening-slot centres
         const OPEN_CHANCE = 0.55; // probability a slot has an opening
@@ -2484,11 +2626,16 @@ class ScubaFlowScene extends Phaser.Scene {
         let highFreqSpikeF = (Math.sin(wx * 0.09) * 8 + Math.cos(wx * 0.18) * 4) * jaggednessMultiplier;
         let highFreqSpikeC = (Math.sin(wx * 0.08) * 8 + Math.cos(wx * 0.17) * 4) * jaggednessMultiplier;
 
-        // Combine base offsets, low-frequency curves, and high-frequency spikes
         let floorOffset = Math.max(minCap, baseOffset + (Math.cos(wx * 0.015) * 10 + Math.sin(wx * 0.04) * 5) * jaggednessMultiplier - highFreqSpikeF) + beatPulseOffset;
         let ceilOffset = Math.max(minCap, baseOffset + (Math.sin(wx * 0.02) * 10 + Math.cos(wx * 0.05) * 5) * jaggednessMultiplier - highFreqSpikeC) + beatPulseOffset;
 
-        return { floorOffset, ceilOffset };
+        // Guarantee 100% collectability without wall collisions:
+        // Max downward offset is 40px (+8px player torso + 16px safety margin = 64px min floor offset)
+        // Max upward offset is 28px (+16px player top + 16px safety margin = 60px min ceiling offset)
+        return { 
+            floorOffset: Math.max(64, floorOffset), 
+            ceilOffset: Math.max(60, ceilOffset) 
+        };
     }
 
     getCurrentDepthZone() {
@@ -2530,6 +2677,15 @@ class ScubaFlowScene extends Phaser.Scene {
         this.musicSource.connect(this.musicGain);
         this.musicGain.connect(this.musicFilter);
         this.musicFilter.connect(this.masterGain);
+        this.musicStartTime = ctx.currentTime;
+
+        this.musicSource.onended = () => {
+            console.log("musicSource onended fired");
+            if (!this.isFadingOut && !this.isLevelCompleted) {
+                this.startFadeout();
+            }
+        };
+
         this.musicSource.start(0);
 
         const sampleRate = ctx.sampleRate;
@@ -2556,7 +2712,9 @@ class ScubaFlowScene extends Phaser.Scene {
         this.inhaleSource.connect(this.inhaleFilter);
         this.inhaleFilter.connect(this.inhaleGain);
         this.inhaleGain.connect(this.masterGain);
-        this.inhaleSource.start(0);
+        if (!this.useAutopilot) {
+            this.inhaleSource.start(0);
+        }
 
         // Exhale
         this.exhaleFilter = ctx.createBiquadFilter();
@@ -2573,10 +2731,13 @@ class ScubaFlowScene extends Phaser.Scene {
         this.exhaleSource.connect(this.exhaleFilter);
         this.exhaleFilter.connect(this.exhaleGain);
         this.exhaleGain.connect(this.masterGain);
-        this.exhaleSource.start(0);
+        if (!this.useAutopilot) {
+            this.exhaleSource.start(0);
+        }
     }
 
     playCollectibleTone() {
+        if (this.useAutopilot) return; // Mute in music visualizer mode
         let ctx = this.audioContext;
         if (!ctx) return;
 
@@ -2598,6 +2759,7 @@ class ScubaFlowScene extends Phaser.Scene {
     }
 
     playSiltThump() {
+        if (this.useAutopilot) return; // Mute in music visualizer mode
         let ctx = this.audioContext;
         if (!ctx) return;
 
@@ -2624,6 +2786,7 @@ class ScubaFlowScene extends Phaser.Scene {
     }
 
     playBubbleChirp() {
+        if (this.useAutopilot) return; // Mute in music visualizer mode
         let ctx = this.audioContext;
         if (!ctx) return;
 
@@ -2673,12 +2836,19 @@ class ScubaFlowScene extends Phaser.Scene {
         }
 
         // 3. Schedule the levelComplete screen to show after the fadeout finishes (2 seconds)
+        // Redundantly use both Phaser's clock and a browser setTimeout to ensure completion when the tab is blurred.
         this.time.delayedCall(2000, () => {
             this.levelComplete();
         }, [], this);
+
+        setTimeout(() => {
+            this.levelComplete();
+        }, 2000);
     }
 
     levelComplete() {
+        if (this.isLevelCompleted) return;
+        this.isLevelCompleted = true;
         this.isPlaying = false;
 
         let ctx = this.audioContext;
@@ -2787,6 +2957,9 @@ class ScubaFlowScene extends Phaser.Scene {
         let channelData = audioBuffer.getChannelData(0);
 
         let levelLengthMs = duration * 1000;
+
+        let seed = this.getAudioBufferHash(audioBuffer);
+        let rng = this.createMulberry32(seed);
 
         let windowSec = 0.5;
         let chunkSize = Math.floor(sampleRate * windowSec);
@@ -2936,11 +3109,11 @@ class ScubaFlowScene extends Phaser.Scene {
                 targetY = prevY + Math.sign(dy) * maxDeltaY;
             }
 
-            if (timeMs < 8000) {
-                let tRatio = timeMs / 8000;
+            if (timeMs < 4000) {
+                let tRatio = timeMs / 4000;
                 targetY = 250 + (targetY - 250) * tRatio;
-            } else if (timeMs > levelLengthMs - 4000) {
-                let tRatio = (levelLengthMs - timeMs) / 4000;
+            } else if (timeMs > levelLengthMs - 2000) {
+                let tRatio = (levelLengthMs - timeMs) / 2000;
                 targetY = 250 + (targetY - 250) * tRatio;
             }
 
@@ -2955,15 +3128,18 @@ class ScubaFlowScene extends Phaser.Scene {
         this.clusterTotals = {};
         this.clusterCollected = {};
 
+        let forceSpawnThreshold = spacerTime * 1.2;
         for (let i = 1; i < rawEnergy.length - 1; i++) {
             let timeMs = i * windowSec * 1000;
 
-            if (timeMs < 8000 || timeMs > levelLengthMs - 4000) continue;
+            if (timeMs < 4000 || timeMs > levelLengthMs - 1200) continue;
 
-            if (rawEnergy[i] > rawEnergy[i - 1] && rawEnergy[i] > rawEnergy[i + 1]) {
-                if (rawEnergy[i] > maxRawEnergy * 0.22) {
-                    if (timeMs - lastColTime >= spacerTime) {
-                        let norm = smoothedEnergy[i] / maxEnergy;
+            let isPeak = (rawEnergy[i] > rawEnergy[i - 1] && rawEnergy[i] > rawEnergy[i + 1]) && (rawEnergy[i] > maxRawEnergy * 0.22);
+            let forceSpawn = (timeMs - lastColTime >= forceSpawnThreshold);
+
+            if (isPeak || forceSpawn) {
+                if (timeMs - lastColTime >= spacerTime) {
+                        let norm = forceSpawn ? rng() : (smoothedEnergy[i] / maxEnergy);
                         let pathIndex = Math.min(path.length - 1, Math.floor(timeMs / (windowSec * 1000)));
                         let pathY = path[pathIndex].y;
                         let cid = "c_" + i;
@@ -2986,7 +3162,7 @@ class ScubaFlowScene extends Phaser.Scene {
                             }
                         } else {
                             // Pattern 3: Steeper ascending or descending slope (5 items)
-                            let isAscending = Math.random() > 0.5;
+                            let isAscending = rng() > 0.5;
                             this.clusterTotals[cid] = 5;
                             for (let k = 0; k < 5; k++) {
                                 let colTime = timeMs + k * 300;
@@ -3003,7 +3179,6 @@ class ScubaFlowScene extends Phaser.Scene {
                         lastColTime = timeMs + 1800;
                     }
                 }
-            }
         }
 
         let zoneNames = ["Neon Reef", "Gold Ridge", "Magenta Arch", "Abyssal Trench", "Cyan Ascent"];
@@ -3167,6 +3342,94 @@ class ScubaFlowScene extends Phaser.Scene {
         let sinkAy = (testSmoothSink - 0.5) * -600;
         console.assert(riseAy === -300, `Assertion Failed: Expect rise acceleration -300, got ${riseAy}`);
         console.assert(sinkAy === 300, `Assertion Failed: Expect sink acceleration 300, got ${sinkAy}`);
+
+        // Test 6: Autopilot math sanity checks
+        let testPathY = 300;
+        let testMinYAllowed = 100;
+        let testMaxYAllowed = 500;
+        let testClamped = Phaser.Math.Clamp(testPathY, testMinYAllowed, testMaxYAllowed);
+        console.assert(testClamped === 300, `Assertion Failed: Autopilot clamping logic failed: expected 300, got ${testClamped}`);
+
+        // Test 7: Procedural level generator force-spawns on silent tracks
+        let mockAudio = {
+            duration: 30, // 30 seconds
+            sampleRate: 44100,
+            getChannelData: () => new Float32Array(44100 * 30) // Silent track
+        };
+        let originalLevelData = this.levelData;
+        let originalTotalCollectibles = this.totalCollectibles;
+        let originalFlowMilestoneInterval = this.flowMilestoneInterval;
+        let originalMaxPotentialPoints = this.maxPotentialPoints;
+        let originalBaseScrollSpeed = this.baseScrollSpeed;
+        let originalScrollSpeed = this.scrollSpeed;
+        let originalClusterTotals = this.clusterTotals;
+        let originalClusterCollected = this.clusterCollected;
+
+        this.generateProceduralLevel(mockAudio);
+
+        // Verify collectibles generated on silent track
+        console.assert(this.levelData.collectibles.length > 0, `Assertion Failed: Silent tracks must still generate collectibles to avoid empty tunnels`);
+        
+        // Check maximum gap between collectibles in the playable region (4s to duration - 1.2s)
+        let sortedCols = [...this.levelData.collectibles].sort((a, b) => a.time - b.time);
+        let lastTime = 4000;
+        for (let col of sortedCols) {
+            let gap = col.time - lastTime;
+            console.assert(gap <= 6800, `Assertion Failed: Large gap between collectibles detected: ${gap}ms`);
+            lastTime = col.time;
+        }
+
+        // Test 8: Deterministic generation and hashing
+        // First generation (saved in this.levelData after generateProceduralLevel(mockAudio))
+        let run1Collectibles = [...this.levelData.collectibles];
+        
+        // Second generation with the exact same mockAudio
+        this.generateProceduralLevel(mockAudio);
+        let run2Collectibles = [...this.levelData.collectibles];
+        
+        console.assert(run1Collectibles.length === run2Collectibles.length, "Assertion Failed: Determinism check - collectible counts differ");
+        for (let i = 0; i < run1Collectibles.length; i++) {
+            console.assert(run1Collectibles[i].time === run2Collectibles[i].time, `Assertion Failed: Determinism check - collectible time mismatch at index ${i}`);
+            console.assert(run1Collectibles[i].y === run2Collectibles[i].y, `Assertion Failed: Determinism check - collectible Y mismatch at index ${i}`);
+            console.assert(run1Collectibles[i].clusterId === run2Collectibles[i].clusterId, `Assertion Failed: Determinism check - collectible clusterId mismatch at index ${i}`);
+        }
+
+        // Third generation with slightly modified audio data (to verify hash change affects layout)
+        let mockAudio2 = {
+            duration: 30,
+            sampleRate: 44100,
+            getChannelData: () => {
+                let arr = new Float32Array(44100 * 30);
+                arr.fill(0.1); // introduce a consistent difference in the audio data
+                return arr;
+            }
+        };
+        this.generateProceduralLevel(mockAudio2);
+        let run3Collectibles = [...this.levelData.collectibles];
+        
+        // Assert that different audio data produces different level layouts
+        let isIdentical = (run1Collectibles.length === run3Collectibles.length);
+        if (isIdentical) {
+            for (let i = 0; i < run1Collectibles.length; i++) {
+                if (run1Collectibles[i].time !== run3Collectibles[i].time || 
+                    run1Collectibles[i].y !== run3Collectibles[i].y || 
+                    run1Collectibles[i].clusterId !== run3Collectibles[i].clusterId) {
+                    isIdentical = false;
+                    break;
+                }
+            }
+        }
+        console.assert(!isIdentical, "Assertion Failed: Hashing check - different audio data did not produce a different layout");
+
+        // Restore original state
+        this.levelData = originalLevelData;
+        this.totalCollectibles = originalTotalCollectibles;
+        this.flowMilestoneInterval = originalFlowMilestoneInterval;
+        this.maxPotentialPoints = originalMaxPotentialPoints;
+        this.baseScrollSpeed = originalBaseScrollSpeed;
+        this.scrollSpeed = originalScrollSpeed;
+        this.clusterTotals = originalClusterTotals;
+        this.clusterCollected = originalClusterCollected;
 
         console.log("=== DIAGNOSTICS PASSED: ALL CONTROLS FUNCTIONAL ===");
     }

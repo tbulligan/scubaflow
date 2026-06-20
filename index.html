@@ -58,6 +58,31 @@
         })();
     </script>
     <meta name="description" content="An action-focused neon buoyancy music game where you control your depth purely with your spacebar and navigate challenging cave tunnels.">
+
+    <!-- Favicon -->
+    <link rel="icon" type="image/svg+xml" href="favicon.svg">
+
+    <!-- Open Graph / Facebook -->
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://scubaflow.bulligan.com/">
+    <meta property="og:site_name" content="ScubaFlow">
+    <meta property="og:title" content="ScubaFlow — Neon Buoyancy Music Game">
+    <meta property="og:description" content="Control your buoyancy, navigate neon cave tunnels, and flow to the rhythm of your own music. Clean zero-HUD experience.">
+    <meta property="og:image" content="https://scubaflow.bulligan.com/scubaflow_og_image.png">
+    <meta property="og:image:secure_url" content="https://scubaflow.bulligan.com/scubaflow_og_image.png">
+    <meta property="og:image:type" content="image/png">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:image:alt" content="ScubaFlow — Neon Buoyancy Music Game preview showing glowing neon cave tunnels.">
+
+    <!-- Twitter -->
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:url" content="https://scubaflow.bulligan.com/">
+    <meta name="twitter:title" content="ScubaFlow — Neon Buoyancy Music Game">
+    <meta name="twitter:description" content="Control your buoyancy, navigate neon cave tunnels, and flow to the rhythm of your own music. Clean zero-HUD experience.">
+    <meta name="twitter:image" content="https://scubaflow.bulligan.com/scubaflow_og_image.png">
+    <meta name="twitter:image:alt" content="ScubaFlow — Neon Buoyancy Music Game preview showing glowing neon cave tunnels.">
+
     <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -278,6 +303,85 @@
             margin-bottom: 16px;
         }
 
+        /* Autopilot Switch Styles */
+        .switch-container {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 12px;
+            margin-bottom: 20px;
+            background: rgba(255, 255, 255, 0.02);
+            padding: 10px 16px;
+            border-radius: 12px;
+            border: 1px solid rgba(0, 240, 255, 0.15);
+            transition: all 0.3s ease;
+        }
+
+        .switch-container:hover {
+            border-color: rgba(0, 240, 255, 0.35);
+            background: rgba(0, 240, 255, 0.03);
+            box-shadow: 0 0 15px rgba(0, 240, 255, 0.05);
+        }
+
+        .switch-label {
+            font-size: 0.85rem;
+            font-weight: 600;
+            letter-spacing: 1px;
+            color: #cbd5e1;
+            cursor: pointer;
+            text-transform: uppercase;
+        }
+
+        .toggle-switch {
+            position: relative;
+            display: inline-block;
+            width: 50px;
+            height: 26px;
+        }
+
+        .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: rgba(8, 14, 38, 0.8);
+            border: 1px solid rgba(255, 255, 255, 0.25);
+            transition: .4s;
+            border-radius: 34px;
+        }
+
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 18px;
+            width: 18px;
+            left: 3px;
+            bottom: 3px;
+            background-color: #94a3b8;
+            transition: .4s;
+            border-radius: 50%;
+        }
+
+        input:checked + .slider {
+            background-color: rgba(189, 0, 255, 0.2);
+            border-color: var(--secondary);
+            box-shadow: 0 0 10px rgba(189, 0, 255, 0.5);
+        }
+
+        input:checked + .slider:before {
+            background-color: var(--primary);
+            transform: translateX(24px);
+            box-shadow: 0 0 8px var(--primary);
+        }
+
         .file-label {
             display: block;
             background: rgba(255, 255, 255, 0.02);
@@ -297,6 +401,34 @@
             border-color: var(--primary);
             color: #fff;
             background: rgba(0, 240, 255, 0.04);
+        }
+
+        .menu-links {
+            margin-top: 24px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 16px;
+            font-size: 0.8rem;
+            font-family: 'Montserrat', sans-serif;
+            letter-spacing: 1.5px;
+            text-transform: uppercase;
+        }
+
+        .menu-link {
+            color: #94a3b8;
+            text-decoration: none;
+            transition: all 0.2s ease;
+            cursor: pointer;
+        }
+
+        .menu-link:hover {
+            color: var(--primary);
+            text-shadow: 0 0 8px rgba(0, 240, 255, 0.6);
+        }
+
+        .menu-divider {
+            color: rgba(255, 255, 255, 0.1);
         }
     </style>
 </head>
@@ -351,9 +483,27 @@
                         FETCH
                     </button>
                 </div>
-                <div id="yt-status" style="font-size:0.75rem;color:#64748b;margin-bottom:8px;min-height:1em;text-align:center;"></div>
+                <div id="yt-status" style="font-size:0.75rem;color:#64748b;margin-bottom:12px;min-height:1em;text-align:center;"></div>
+
+                <!-- Autopilot / Music Visualizer Switch -->
+                <div class="switch-container" style="margin-bottom: 8px;">
+                    <span class="switch-label" id="autopilot-label">Autopilot (Music Visualizer Mode)</span>
+                    <label class="toggle-switch" aria-labelledby="autopilot-label">
+                        <input type="checkbox" id="autopilot-checkbox">
+                        <span class="slider"></span>
+                    </label>
+                </div>
+                <div style="font-size: 0.72rem; color: #94a3b8; opacity: 0.7; margin-bottom: 20px; text-transform: uppercase; letter-spacing: 1px;">
+                    Mutes game sounds to focus purely on your music track
+                </div>
 
                 <button id="btn-dive" class="btn-dive" type="button" disabled style="opacity: 0.5; pointer-events: none;">Select a Music Track</button>
+
+                <div class="menu-links">
+                    <a href="https://tomaso.bulligan.com/#contact" target="_blank" rel="noopener noreferrer" class="menu-link">Contact</a>
+                    <span class="menu-divider">|</span>
+                    <a href="https://github.com/tbulligan/scubaflow" target="_blank" rel="noopener noreferrer" class="menu-link">GitHub</a>
+                </div>
             </div>
         </div>
     </div>
@@ -362,6 +512,12 @@
     <script>
         window.selectedAvatar = 'diver';
         window.customAudioBuffer = null;
+        window.useAutopilot = false;
+
+        // Autopilot Switch Logic
+        document.getElementById('autopilot-checkbox').addEventListener('change', (e) => {
+            window.useAutopilot = e.target.checked;
+        });
 
         // Custom Audio Loading Logic
         const fileInput = document.getElementById('audio-file-input');

@@ -14,7 +14,7 @@ ScubaFlow generates an immersive, glowing underwater cave system synchronized dy
   - **Lung Volume**: Indicated by the scale of your diver's chest and breathing synthesizer frequencies.
   - **Depth**: Represented by ambient color shifts in the deep neon waters.
   - **Silt-Outs**: Bumping into cave walls stirs up clouds of sediment, temporarily blinding you and resetting your flow multiplier.
-- **Diving Buddy AI**: Your companion demonstrates perfect buoyancy using advanced terrain-clamping pathfinding, checking in with speech bubbles (`👌?`, `👌!`) to help you recover your flow after silt-outs.
+- **Diving Buddy AI**: Your companion navigates safely alongside you using advanced terrain-clamping pathfinding, checking in with speech bubbles (`👌?`, `👌!`) to help you recover your flow after silt-outs.
 
 ---
 
