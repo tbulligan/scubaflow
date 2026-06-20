@@ -51,7 +51,7 @@ The repository code is the absolute source of truth:
 - To prevent impossible collisions where steep slopes narrow the corridor below the clearance of the player's horizontally extended $64\text{px}$ shape (fins to outstretched arm):
   - The game dynamically samples the local corridor slope $S = dy/dx$ from the path center generator.
   - The minimum safety cap `minCap` and `baseOffset` dynamically scale using `slopeClearance = 28.5 + (S < 0 ? -29.0 * S : 15.0 * S)` to expand the cave on steep upward and downward sections.
-  - This guarantees that all generated sloping tunnels are navigable and that all procedural collectibles (spanned up to $40\text{px}$ offset) are mathematically attainable.
+  - This guarantees that all generated sloping tunnels are navigable and that all procedural collectibles (spanned up to $24\text{px}$ offset and dynamically clamped to be at least $40\text{px}$ clear of both floor and ceiling boundaries at their exact position) are mathematically attainable without colliding.
 
 ### End of Dive Sequence
 - The level completion triggers when the player reaches the end coordinates (`player.x >= targetEndX` where `targetEndX = 250 + (songLengthMs / 1000) * baseScrollSpeed`), the track time completes (`elapsedTime >= songLengthMs`), or `musicSource.onended` fires.
