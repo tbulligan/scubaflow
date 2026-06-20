@@ -127,6 +127,16 @@ class ScubaFlowScene extends Phaser.Scene {
             padding: { x: 8, y: 4 }
         }).setOrigin(0.5).setDepth(20).setVisible(false);
 
+        // Create in-game progress HUD
+        this.progressHUD = this.add.text(1185, 15, "", {
+            fontFamily: 'Outfit',
+            fontSize: '15px',
+            color: '#cbd5e1',
+            fontStyle: 'bold',
+            backgroundColor: 'rgba(2, 5, 20, 0.45)',
+            padding: { x: 8, y: 4 }
+        }).setOrigin(1, 0).setDepth(100).setScrollFactor(0).setVisible(false);
+
         // 6. Setup Graphics layers
         this.parallaxFarGraphics = this.add.graphics().setDepth(-2).setScrollFactor(0);  // farthest layer (slowest) — screen-space so it tiles left correctly
         this.parallaxNearGraphics = this.add.graphics().setDepth(-1); // near layer (faster)
@@ -341,6 +351,7 @@ class ScubaFlowScene extends Phaser.Scene {
                 console.log("Countdown complete. Starting setupAudioEngine...");
                 this.setupAudioEngine(ctx);
                 console.log("setupAudioEngine completed.");
+                this.showTrackStartOverlay();
             }
         };
 
@@ -803,6 +814,29 @@ class ScubaFlowScene extends Phaser.Scene {
                 this.scrollSpeed = Phaser.Math.Linear(this.scrollSpeed, this.baseScrollSpeed * 0.72, physDt * 3); // less punishing slowdown
             } else {
                 this.scrollSpeed = Phaser.Math.Linear(this.scrollSpeed, this.baseScrollSpeed, physDt * 2.5);
+            }
+
+            // Update in-game progress HUD in upper-right corner
+            if (window.showGameplayHUD && !this.countdownActive && this.isPlaying && !this.isFadingOut && !this.isLevelCompleted) {
+                let trackName = window.customTrackName || "Track";
+                let elapsedSec = Math.floor(this.elapsedTime / 1000);
+                let durationSec = Math.floor(this.levelData.songLengthMs / 1000);
+                
+                let curMin = Math.floor(elapsedSec / 60);
+                let curSec = Math.floor(elapsedSec % 60);
+                let durMin = Math.floor(durationSec / 60);
+                let durSec = Math.floor(durationSec % 60);
+                
+                let progressStr = `${curMin}:${curSec.toString().padStart(2, '0')} / ${durMin}:${durSec.toString().padStart(2, '0')}`;
+                
+                let currentZone = this.getCurrentDepthZone();
+                let colorStr = currentZone ? Phaser.Display.Color.IntegerToColor(currentZone.ceilColor).toCSS() : '#00f0ff';
+                
+                this.progressHUD.setText(`${trackName.toUpperCase()} | ${progressStr}`);
+                this.progressHUD.setColor(colorStr);
+                this.progressHUD.setVisible(true);
+            } else {
+                this.progressHUD.setVisible(false);
             }
 
             // Score multiplier logic (avoiding silt-outs increases multiplier dynamically)
@@ -2986,6 +3020,52 @@ class ScubaFlowScene extends Phaser.Scene {
         }, 2000);
     }
 
+    showTrackStartOverlay() {
+        let trackName = window.customTrackName || "Unknown Track";
+        let durationMs = this.levelData.songLengthMs || 0;
+        let minutes = Math.floor(durationMs / 60000);
+        let seconds = Math.floor((durationMs % 60000) / 1000);
+        let durationStr = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+
+        let currentZone = this.getCurrentDepthZone();
+        let colorStr = currentZone ? Phaser.Display.Color.IntegerToColor(currentZone.ceilColor).toCSS() : '#00f0ff';
+
+        let infoText = this.add.text(600, 260, `TRACK: ${trackName.toUpperCase()}`, {
+            fontFamily: 'Outfit',
+            fontSize: '32px',
+            fontStyle: 'bold',
+            color: colorStr,
+            align: 'center'
+        }).setOrigin(0.5).setDepth(100).setAlpha(0);
+
+        let durationText = this.add.text(600, 310, `DURATION: ${durationStr}`, {
+            fontFamily: 'Outfit',
+            fontSize: '20px',
+            color: '#cbd5e1',
+            align: 'center'
+        }).setOrigin(0.5).setDepth(100).setAlpha(0);
+
+        this.tweens.add({
+            targets: [infoText, durationText],
+            alpha: 1,
+            duration: 800,
+            ease: 'Power2',
+            onComplete: () => {
+                this.time.delayedCall(2200, () => {
+                    this.tweens.add({
+                        targets: [infoText, durationText],
+                        alpha: 0,
+                        duration: 800,
+                        onComplete: () => {
+                            infoText.destroy();
+                            durationText.destroy();
+                        }
+                    });
+                });
+            }
+        });
+    }
+
     levelComplete() {
         if (this.isLevelCompleted) return;
         this.isLevelCompleted = true;
@@ -3068,11 +3148,20 @@ class ScubaFlowScene extends Phaser.Scene {
 
         let titleText = isPerfect ? 'PERFECT FLOW' : 'DIVE COMPLETED';
 
+        let trackName = window.customTrackName || "Custom Track";
+        let durationMs = this.levelData.songLengthMs || 0;
+        let minutes = Math.floor(durationMs / 60000);
+        let seconds = Math.floor((durationMs % 60000) / 1000);
+        let durationStr = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+
         let innerCard = document.createElement('div');
         innerCard.className = 'glass-card';
         innerCard.style.textAlign = 'center';
         innerCard.innerHTML = `
             <h1 style="${titleStyle}">${titleText}</h1>
+            <div style="font-size: 0.9rem; color: #94a3b8; margin-top: -10px; margin-bottom: 15px; font-weight: 500; letter-spacing: 1px;">
+                ${trackName.toUpperCase()} (${durationStr})
+            </div>
             <div style="margin-bottom: 20px; display: flex; justify-content: center; align-items: center;">
                 ${starString}
             </div>

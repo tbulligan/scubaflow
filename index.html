@@ -423,6 +423,18 @@
                     Mutes game sounds to focus purely on your music track
                 </div>
 
+                <!-- Gameplay HUD Switch -->
+                <div class="switch-container" style="margin-bottom: 8px;">
+                    <span class="switch-label" id="hud-label">Show HUD during gameplay</span>
+                    <label class="toggle-switch" aria-labelledby="hud-label">
+                        <input type="checkbox" id="hud-checkbox">
+                        <span class="slider"></span>
+                    </label>
+                </div>
+                <div style="font-size: 0.72rem; color: #94a3b8; opacity: 0.7; margin-bottom: 20px; text-transform: uppercase; letter-spacing: 1px;">
+                    Displays track progress and duration in the upper-right corner
+                </div>
+
                 <button id="btn-dive" class="btn-dive" type="button" disabled style="opacity: 0.5; pointer-events: none;">Select a Music Track</button>
 
                 <div class="menu-links">
@@ -439,10 +451,16 @@
         window.selectedAvatar = 'diver';
         window.customAudioBuffer = null;
         window.useAutopilot = false;
+        window.showGameplayHUD = false;
 
         // Autopilot Switch Logic
         document.getElementById('autopilot-checkbox').addEventListener('change', (e) => {
             window.useAutopilot = e.target.checked;
+        });
+
+        // HUD Switch Logic
+        document.getElementById('hud-checkbox').addEventListener('change', (e) => {
+            window.showGameplayHUD = e.target.checked;
         });
 
         // Custom Audio Loading Logic
@@ -455,6 +473,7 @@
                 const reader = new FileReader();
                 reader.onload = (event) => {
                     window.customAudioBuffer = event.target.result; // Store as ArrayBuffer
+                    window.customTrackName = file.name; // Store track name
                     fileLabelText.textContent = `✅ Loaded: ${file.name}`;
                     fileLabelText.style.borderColor = '#00f0ff';
                     fileLabelText.style.color = '#00f0ff';
