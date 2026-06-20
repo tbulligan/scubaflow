@@ -3600,9 +3600,10 @@ class ScubaFlowScene extends Phaser.Scene {
         };
 
         const getClampedCollectibleY = (colTime, offset) => {
-            let colPathY = getInterpolatedPathY(colTime);
+            let colTimeAtX = colTime + (250 / this.baseScrollSpeed) * 1000;
+            let colPathY = getInterpolatedPathY(colTimeAtX);
             let colX = (colTime / 1000) * this.baseScrollSpeed + 250;
-            let localEnergy = this.getEnergyAtTime(colTime);
+            let localEnergy = this.getEnergyAtTime(colTimeAtX);
             let { floorOffset, ceilOffset } = this.getWallOffsets(colX, localEnergy);
             let targetColY = colPathY + offset;
             // Clamp Y to be at least 40px away from ceiling and floor
