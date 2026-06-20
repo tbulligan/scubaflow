@@ -645,6 +645,9 @@ class ScubaFlowScene extends Phaser.Scene {
                 this.player.y += this.vy * physDt;
             }
 
+            // Capture pre-clamp velocity for collision impact calculations
+            let preClampVy = this.vy;
+
             // Strict position-clamping for Autopilot to guarantee 100% no silt-outs
             if (this.useAutopilot) {
                 let px = this.player.x;
@@ -699,7 +702,7 @@ class ScubaFlowScene extends Phaser.Scene {
             let collisionSource = 'floor';
 
             // Capture pre-collision vertical velocity to determine impact strength
-            let impactVy = this.vy;
+            let impactVy = preClampVy;
 
             for (let pt of checkPoints) {
                 let wx = px + pt.x;
@@ -2808,14 +2811,14 @@ class ScubaFlowScene extends Phaser.Scene {
         // Scale duration inversely with level scroll speed to keep blind travel distance consistent
         let speedFactor = 50 / this.baseScrollSpeed;
         let currentDuration = this.siltDuration * scale * speedFactor;
-        this.siltTime = currentDuration;
-        this.currentSiltDuration = currentDuration;
 
         // Shift baseHue complementary (120 degrees) on each bump to dramatically shift the visual color palette
         this.baseHue = (this.baseHue + 120) % 360;
 
         if (!this.siltActive) {
             this.siltActive = true;
+            this.siltTime = currentDuration;
+            this.currentSiltDuration = currentDuration;
             if (this.scoreMultiplier > 1) {
                 this.scoreMultiplier = 1;
                 this.spawnFloatingText(this.player.x, this.player.y - 35, "NEON-FLOW RESET", '#ff1e56');
@@ -2823,6 +2826,12 @@ class ScubaFlowScene extends Phaser.Scene {
                 this.scoreMultiplier = 1;
             }
             this.siltFreeTime = 0;
+        } else {
+            // If already in a silt-out, only update if the new impact is stronger than what was used to set the current remaining time
+            if (currentDuration > this.siltTime) {
+                this.siltTime = currentDuration;
+                this.currentSiltDuration = currentDuration;
+            }
         }
 
         // Throttle heavy visuals to every 800ms
@@ -3562,6 +3571,20 @@ class ScubaFlowScene extends Phaser.Scene {
         this.clusterTotals = {};
         this.clusterCollected = {};
 
+        const getInterpolatedPathY = (timeMs) => {
+            if (timeMs <= path[0].time) return path[0].y;
+            if (timeMs >= path[path.length - 1].time) return path[path.length - 1].y;
+            for (let idx = 0; idx < path.length - 1; idx++) {
+                let k0 = path[idx];
+                let k1 = path[idx + 1];
+                if (timeMs >= k0.time && timeMs <= k1.time) {
+                    let ratio = (timeMs - k0.time) / (k1.time - k0.time);
+                    return k0.y + (k1.y - k0.y) * ratio;
+                }
+            }
+            return 350;
+        };
+
         let forceSpawnThreshold = spacerTime * 1.2;
         let numCollectibleChunks = Math.floor(songLengthMs / (windowSec * 1000));
         for (let i = 1; i < numCollectibleChunks - 1; i++) {
@@ -3589,21 +3612,18 @@ class ScubaFlowScene extends Phaser.Scene {
             if (isPeak || forceSpawn) {
                 if (timeMs - lastColTime >= spacerTime) {
                     let norm = forceSpawn ? rng() : (smoothedEnergyVal / maxEnergy);
-                    let pathIndex = Math.min(path.length - 1, Math.floor(timeMs / (windowSec * 1000)));
-                    let pathY = path[pathIndex].y;
                     let cid = "c_" + i;
 
                     if (norm < 0.35) {
                         // Pattern 1: Single item at path center
-                        collectibles.push({ time: timeMs, y: pathY, clusterId: cid });
+                        collectibles.push({ time: timeMs, y: getInterpolatedPathY(timeMs), clusterId: cid });
                         this.clusterTotals[cid] = 1;
                     } else if (norm < 0.65) {
                         // Pattern 2: Smooth sine wave curve (4 items)
                         this.clusterTotals[cid] = 4;
                         for (let k = 0; k < 4; k++) {
                             let colTime = timeMs + k * 350;
-                            let colPathIndex = Math.min(path.length - 1, Math.floor(colTime / (windowSec * 1000)));
-                            let colPathY = path[colPathIndex].y;
+                            let colPathY = getInterpolatedPathY(colTime);
                             // Smooth sine wave offset (balanced to fit safe navigation bounds: Max upward -28, Max downward 40)
                             let rawOffset = Math.sin(k * Math.PI / 2) * 35;
                             let offset = rawOffset < 0 ? Math.max(rawOffset, -28) : Math.min(rawOffset, 40);
@@ -3615,8 +3635,7 @@ class ScubaFlowScene extends Phaser.Scene {
                         this.clusterTotals[cid] = 5;
                         for (let k = 0; k < 5; k++) {
                             let colTime = timeMs + k * 300;
-                            let colPathIndex = Math.min(path.length - 1, Math.floor(colTime / (windowSec * 1000)));
-                            let colPathY = path[colPathIndex].y;
+                            let colPathY = getInterpolatedPathY(colTime);
                             // Interpolate (steeper slope for challenge, scaled to fit safe navigation bounds: Max upward -28, Max downward 40)
                             let ratio = (k / 4) * 2 - 1; // -1 to 1
                             let rawOffset = ratio * (isAscending ? -45 : 45);
