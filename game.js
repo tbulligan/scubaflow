@@ -3277,6 +3277,9 @@ class ScubaFlowScene extends Phaser.Scene {
         this.clusterTotals = {};
         this.clusterCollected = {};
 
+        // Temporarily set levelData.path so helper methods like getWallOffsets and getEnergyAtTime can be used
+        this.levelData = { path: path };
+
         const getInterpolatedPathY = (timeMs) => {
             if (timeMs <= path[0].time) return path[0].y;
             if (timeMs >= path[path.length - 1].time) return path[path.length - 1].y;
@@ -3289,6 +3292,16 @@ class ScubaFlowScene extends Phaser.Scene {
                 }
             }
             return 350;
+        };
+
+        const getClampedCollectibleY = (colTime, offset) => {
+            let colPathY = getInterpolatedPathY(colTime);
+            let colX = (colTime / 1000) * this.baseScrollSpeed + 250;
+            let localEnergy = this.getEnergyAtTime(colTime);
+            let { floorOffset, ceilOffset } = this.getWallOffsets(colX, localEnergy);
+            let targetColY = colPathY + offset;
+            // Clamp Y to be at least 40px away from ceiling and floor
+            return Phaser.Math.Clamp(targetColY, colPathY - ceilOffset + 40, colPathY + floorOffset - 40);
         };
 
         let forceSpawnThreshold = spacerTime * 1.2;
@@ -3322,18 +3335,17 @@ class ScubaFlowScene extends Phaser.Scene {
 
                     if (norm < 0.35) {
                         // Pattern 1: Single item at path center
-                        collectibles.push({ time: timeMs, y: getInterpolatedPathY(timeMs), clusterId: cid });
+                        collectibles.push({ time: timeMs, y: getClampedCollectibleY(timeMs, 0), clusterId: cid });
                         this.clusterTotals[cid] = 1;
                     } else if (norm < 0.65) {
                         // Pattern 2: Smooth sine wave curve (4 items)
                         this.clusterTotals[cid] = 4;
                         for (let k = 0; k < 4; k++) {
                             let colTime = timeMs + k * 350;
-                            let colPathY = getInterpolatedPathY(colTime);
-                            // Smooth sine wave offset (balanced to fit safe navigation bounds: Max upward -28, Max downward 40)
-                            let rawOffset = Math.sin(k * Math.PI / 2) * 35;
-                            let offset = rawOffset < 0 ? Math.max(rawOffset, -28) : Math.min(rawOffset, 40);
-                            collectibles.push({ time: colTime, y: colPathY + offset, clusterId: cid });
+                            // Smooth sine wave offset (balanced to fit safe navigation bounds: Max upward -20, Max downward 24)
+                            let rawOffset = Math.sin(k * Math.PI / 2) * 30;
+                            let offset = rawOffset < 0 ? Math.max(rawOffset, -20) : Math.min(rawOffset, 24);
+                            collectibles.push({ time: colTime, y: getClampedCollectibleY(colTime, offset), clusterId: cid });
                         }
                     } else {
                         // Pattern 3: Steeper ascending or descending slope (5 items)
@@ -3341,12 +3353,11 @@ class ScubaFlowScene extends Phaser.Scene {
                         this.clusterTotals[cid] = 5;
                         for (let k = 0; k < 5; k++) {
                             let colTime = timeMs + k * 300;
-                            let colPathY = getInterpolatedPathY(colTime);
-                            // Interpolate (steeper slope for challenge, scaled to fit safe navigation bounds: Max upward -28, Max downward 40)
+                            // Interpolate (steeper slope for challenge, scaled to fit safe navigation bounds: Max upward -20, Max downward 24)
                             let ratio = (k / 4) * 2 - 1; // -1 to 1
-                            let rawOffset = ratio * (isAscending ? -45 : 45);
-                            let offset = rawOffset < 0 ? Math.max(rawOffset, -28) : Math.min(rawOffset, 40);
-                            collectibles.push({ time: colTime, y: colPathY + offset, clusterId: cid });
+                            let rawOffset = ratio * (isAscending ? -40 : 40);
+                            let offset = rawOffset < 0 ? Math.max(rawOffset, -20) : Math.min(rawOffset, 24);
+                            collectibles.push({ time: colTime, y: getClampedCollectibleY(colTime, offset), clusterId: cid });
                         }
                     }
                     // Update lastColTime to avoid overlaps
