@@ -71,6 +71,7 @@ class ScubaFlowScene extends Phaser.Scene {
         this.levelData = {
             bpm: 60,
             levelLengthMs: 120000,
+            songLengthMs: 120000,
             path: [
                 { time: 0, y: 200, energy: 0.2 },
                 { time: 30000, y: 450, energy: 0.5 },
@@ -292,7 +293,8 @@ class ScubaFlowScene extends Phaser.Scene {
             let physDt = Math.min(dt, 0.15); // cap physics step to prevent physics engine explosions
 
             // Ensure we stop when music/level completes
-            if (this.elapsedTime >= this.levelData.levelLengthMs) {
+            let targetEndX = (this.levelData.songLengthMs / 1000) * this.baseScrollSpeed + 250;
+            if (this.player.x >= targetEndX) {
                 if (!this.isFadingOut) {
                     this.startFadeout();
                 }
@@ -317,12 +319,12 @@ class ScubaFlowScene extends Phaser.Scene {
                 let foot1Y = 2 - (12 - kickExtension2 * 8) - (10 - kickExtension2 * 10);
 
                 checkPoints = [
-                    { x: 0,   y: 0,       r: 8,  floor: true,  ceil: true  }, // Torso center (chest ellipse half-h=8)
-                    { x: 14,  y: -4,      r: 5,  floor: true,  ceil: true  }, // Head
-                    { x: -10, y: -13,     r: 3,  floor: false, ceil: true  }, // Tank tops (highest solid point)
-                    { x: 26,  y: -2,      r: 4,  floor: true,  ceil: true  }, // Light hand (forward-most)
-                    { x: foot1X, y: foot1Y, r: 5, floor: true, ceil: true }, // Foot 1 — floor & ceiling
-                    { x: foot2X, y: foot2Y, r: 5, floor: true, ceil: true }, // Foot 2 — floor & ceiling
+                    { x: 0,   y: 0,       r: 6.5,  floor: true,  ceil: true  }, // Torso center
+                    { x: 14,  y: -4,      r: 4,    floor: true,  ceil: true  }, // Head
+                    { x: -10, y: -13,     r: 2,    floor: false, ceil: true  }, // Tank tops (highest solid point)
+                    { x: 26,  y: -2,      r: 3,    floor: true,  ceil: true  }, // Light hand (forward-most)
+                    { x: foot1X, y: foot1Y, r: 4,    floor: true,  ceil: true  }, // Foot 1 — floor & ceiling
+                    { x: foot2X, y: foot2Y, r: 4,    floor: true,  ceil: true  }, // Foot 2 — floor & ceiling
                 ];
             } else {
                 checkPoints = [
@@ -435,8 +437,8 @@ class ScubaFlowScene extends Phaser.Scene {
             // 3. Simplified Buoyancy Physics
             let lastY = this.player.y;
             if (!this.useAutopilot) {
-                this.buoyancySmooth += (this.V_lung - this.buoyancySmooth) * physDt * 4.5;
-                let ay = (this.buoyancySmooth - 0.5) * -600; // Damped to ±300 px/s² for fine steering
+                this.buoyancySmooth += (this.V_lung - this.buoyancySmooth) * physDt * 5.2;
+                let ay = (this.buoyancySmooth - 0.5) * -680; // Swifter, more responsive buoyancy acceleration
 
                 this.vy += ay * physDt;
                 this.vy *= Math.exp(-this.dragCoeff * physDt);
@@ -2362,7 +2364,7 @@ class ScubaFlowScene extends Phaser.Scene {
         let targetAlpha = this.siltActive ? 0.12 : 0.95;
 
         // Build body hitbox list (mirrors update() collision checkpoints)
-        let collectPts = [{ x: 0, y: 0, r: 8 }]; // fallback for non-diver
+        let collectPts = [{ x: 0, y: 0, r: 6.5 }]; // fallback for non-diver
         if (this.avatarType === 'diver') {
             let frogPhase = (this.elapsedTime / 350) % (Math.PI * 2);
             let ke  = Math.max(0, Math.sin(frogPhase));
@@ -2372,12 +2374,12 @@ class ScubaFlowScene extends Phaser.Scene {
             let f1x = -10 - (6 + ke2 * 8) - (2 + ke2 * 12);
             let f1y =  2  - (12 - ke2 * 8) - (10 - ke2 * 10);
             collectPts = [
-                { x: 0,   y: 0,   r: 8 },  // torso
-                { x: 14,  y: -4,  r: 5 },  // head
-                { x: -10, y: -13, r: 3 },  // tank
-                { x: 26,  y: -2,  r: 4 },  // hand
-                { x: f1x, y: f1y, r: 5 },  // foot 1 + fin
-                { x: f2x, y: f2y, r: 5 },  // foot 2 + fin
+                { x: 0,   y: 0,   r: 6.5 },  // torso
+                { x: 14,  y: -4,  r: 4 },    // head
+                { x: -10, y: -13, r: 2 },    // tank
+                { x: 26,  y: -2,  r: 3 },    // hand
+                { x: f1x, y: f1y, r: 4 },    // foot 1 + fin
+                { x: f2x, y: f2y, r: 4 },    // foot 2 + fin
             ];
         }
 
@@ -2956,7 +2958,8 @@ class ScubaFlowScene extends Phaser.Scene {
         let sampleRate = audioBuffer.sampleRate;
         let channelData = audioBuffer.getChannelData(0);
 
-        let levelLengthMs = duration * 1000;
+        let songLengthMs = duration * 1000;
+        let levelLengthMs = songLengthMs + 45000;
 
         let seed = this.getAudioBufferHash(audioBuffer);
         let rng = this.createMulberry32(seed);
@@ -3031,11 +3034,11 @@ class ScubaFlowScene extends Phaser.Scene {
 
         // If track is very quiet, ambient, or spoken-word, it may yield almost no beats.
         // Fall back to a steady, relaxing 60 BPM rhythm (every 1000ms) to ensure gameplay remains engaging.
-        let minExpectedBeats = levelLengthMs / 5000;
+        let minExpectedBeats = songLengthMs / 5000;
         if (beats.length < minExpectedBeats) {
             console.log(`Procedural fallback: detected only ${beats.length} beats. Generating a relaxing 60 BPM grid.`);
             beats = [];
-            for (let t = 2000; t < levelLengthMs - 2000; t += 1000) {
+            for (let t = 2000; t < songLengthMs - 2000; t += 1000) {
                 beats.push(t);
             }
         }
@@ -3087,8 +3090,16 @@ class ScubaFlowScene extends Phaser.Scene {
         }
         let prevY = 250;
 
-        for (let i = 0; i < smoothedEnergy.length; i++) {
-            let norm = 0.5 + ((smoothedEnergy[i] - avgSmoothed) / energyRange);
+        let totalChunks = Math.floor(levelLengthMs / (windowSec * 1000));
+        for (let i = 0; i < totalChunks; i++) {
+            let energyVal;
+            if (i < smoothedEnergy.length) {
+                energyVal = smoothedEnergy[i];
+            } else {
+                let wrapIdx = i % smoothedEnergy.length;
+                energyVal = smoothedEnergy[wrapIdx];
+            }
+            let norm = 0.5 + ((energyVal - avgSmoothed) / energyRange);
             // Only compress dynamic range to keep the path flat if the song is actually flat/low-dynamic
             let normLimit = isLowDynamicRange ? 0.20 : 0.40;
             norm = Math.max(0.5 - normLimit, Math.min(0.5 + normLimit, norm));
@@ -3129,56 +3140,71 @@ class ScubaFlowScene extends Phaser.Scene {
         this.clusterCollected = {};
 
         let forceSpawnThreshold = spacerTime * 1.2;
-        for (let i = 1; i < rawEnergy.length - 1; i++) {
+        let numCollectibleChunks = Math.floor(levelLengthMs / (windowSec * 1000));
+        for (let i = 1; i < numCollectibleChunks - 1; i++) {
             let timeMs = i * windowSec * 1000;
 
             if (timeMs < 4000 || timeMs > levelLengthMs - 1200) continue;
 
-            let isPeak = (rawEnergy[i] > rawEnergy[i - 1] && rawEnergy[i] > rawEnergy[i + 1]) && (rawEnergy[i] > maxRawEnergy * 0.22);
+            let energyVal, prevEnergyVal, nextEnergyVal, smoothedEnergyVal;
+            if (i < rawEnergy.length) {
+                energyVal = rawEnergy[i];
+                prevEnergyVal = rawEnergy[i - 1];
+                nextEnergyVal = rawEnergy[i + 1];
+                smoothedEnergyVal = smoothedEnergy[i];
+            } else {
+                let wrapIdx = i % rawEnergy.length;
+                energyVal = rawEnergy[wrapIdx];
+                prevEnergyVal = rawEnergy[(i - 1) % rawEnergy.length];
+                nextEnergyVal = rawEnergy[(i + 1) % rawEnergy.length];
+                smoothedEnergyVal = smoothedEnergy[wrapIdx];
+            }
+
+            let isPeak = (energyVal > prevEnergyVal && energyVal > nextEnergyVal) && (energyVal > maxRawEnergy * 0.22);
             let forceSpawn = (timeMs - lastColTime >= forceSpawnThreshold);
 
             if (isPeak || forceSpawn) {
                 if (timeMs - lastColTime >= spacerTime) {
-                        let norm = forceSpawn ? rng() : (smoothedEnergy[i] / maxEnergy);
-                        let pathIndex = Math.min(path.length - 1, Math.floor(timeMs / (windowSec * 1000)));
-                        let pathY = path[pathIndex].y;
-                        let cid = "c_" + i;
+                    let norm = forceSpawn ? rng() : (smoothedEnergyVal / maxEnergy);
+                    let pathIndex = Math.min(path.length - 1, Math.floor(timeMs / (windowSec * 1000)));
+                    let pathY = path[pathIndex].y;
+                    let cid = "c_" + i;
 
-                        if (norm < 0.35) {
-                            // Pattern 1: Single item at path center
-                            collectibles.push({ time: timeMs, y: pathY, clusterId: cid });
-                            this.clusterTotals[cid] = 1;
-                        } else if (norm < 0.65) {
-                            // Pattern 2: Smooth sine wave curve (4 items)
-                            this.clusterTotals[cid] = 4;
-                            for (let k = 0; k < 4; k++) {
-                                let colTime = timeMs + k * 350;
-                                let colPathIndex = Math.min(path.length - 1, Math.floor(colTime / (windowSec * 1000)));
-                                let colPathY = path[colPathIndex].y;
-                                // Smooth sine wave offset (balanced to fit safe navigation bounds: Max upward -28, Max downward 40)
-                                let rawOffset = Math.sin(k * Math.PI / 2) * 35;
-                                let offset = rawOffset < 0 ? Math.max(rawOffset, -28) : Math.min(rawOffset, 40);
-                                collectibles.push({ time: colTime, y: colPathY + offset, clusterId: cid });
-                            }
-                        } else {
-                            // Pattern 3: Steeper ascending or descending slope (5 items)
-                            let isAscending = rng() > 0.5;
-                            this.clusterTotals[cid] = 5;
-                            for (let k = 0; k < 5; k++) {
-                                let colTime = timeMs + k * 300;
-                                let colPathIndex = Math.min(path.length - 1, Math.floor(colTime / (windowSec * 1000)));
-                                let colPathY = path[colPathIndex].y;
-                                // Interpolate (steeper slope for challenge, scaled to fit safe navigation bounds: Max upward -28, Max downward 40)
-                                let ratio = (k / 4) * 2 - 1; // -1 to 1
-                                let rawOffset = ratio * (isAscending ? -45 : 45);
-                                let offset = rawOffset < 0 ? Math.max(rawOffset, -28) : Math.min(rawOffset, 40);
-                                collectibles.push({ time: colTime, y: colPathY + offset, clusterId: cid });
-                            }
+                    if (norm < 0.35) {
+                        // Pattern 1: Single item at path center
+                        collectibles.push({ time: timeMs, y: pathY, clusterId: cid });
+                        this.clusterTotals[cid] = 1;
+                    } else if (norm < 0.65) {
+                        // Pattern 2: Smooth sine wave curve (4 items)
+                        this.clusterTotals[cid] = 4;
+                        for (let k = 0; k < 4; k++) {
+                            let colTime = timeMs + k * 350;
+                            let colPathIndex = Math.min(path.length - 1, Math.floor(colTime / (windowSec * 1000)));
+                            let colPathY = path[colPathIndex].y;
+                            // Smooth sine wave offset (balanced to fit safe navigation bounds: Max upward -28, Max downward 40)
+                            let rawOffset = Math.sin(k * Math.PI / 2) * 35;
+                            let offset = rawOffset < 0 ? Math.max(rawOffset, -28) : Math.min(rawOffset, 40);
+                            collectibles.push({ time: colTime, y: colPathY + offset, clusterId: cid });
                         }
-                        // Update lastColTime to avoid overlaps
-                        lastColTime = timeMs + 1800;
+                    } else {
+                        // Pattern 3: Steeper ascending or descending slope (5 items)
+                        let isAscending = rng() > 0.5;
+                        this.clusterTotals[cid] = 5;
+                        for (let k = 0; k < 5; k++) {
+                            let colTime = timeMs + k * 300;
+                            let colPathIndex = Math.min(path.length - 1, Math.floor(colTime / (windowSec * 1000)));
+                            let colPathY = path[colPathIndex].y;
+                            // Interpolate (steeper slope for challenge, scaled to fit safe navigation bounds: Max upward -28, Max downward 40)
+                            let ratio = (k / 4) * 2 - 1; // -1 to 1
+                            let rawOffset = ratio * (isAscending ? -45 : 45);
+                            let offset = rawOffset < 0 ? Math.max(rawOffset, -28) : Math.min(rawOffset, 40);
+                            collectibles.push({ time: colTime, y: colPathY + offset, clusterId: cid });
+                        }
                     }
+                    // Update lastColTime to avoid overlaps
+                    lastColTime = timeMs + 1800;
                 }
+            }
         }
 
         let zoneNames = ["Neon Reef", "Gold Ridge", "Magenta Arch", "Abyssal Trench", "Cyan Ascent"];
@@ -3220,13 +3246,14 @@ class ScubaFlowScene extends Phaser.Scene {
         this.levelData = {
             bpm: 60,
             levelLengthMs: levelLengthMs,
+            songLengthMs: songLengthMs,
             path: path,
             collectibles: collectibles,
             zones: zones,
             beats: beats
         };
-        this.totalCollectibles = collectibles.length;
-        this.flowMilestoneInterval = Math.max(6000, Math.min(15000, levelLengthMs / 15));
+        this.totalCollectibles = collectibles.filter(c => c.time <= songLengthMs).length;
+        this.flowMilestoneInterval = Math.max(6000, Math.min(15000, songLengthMs / 15));
         this.maxPotentialPoints = this.calculateMaxPotentialPoints();
 
         console.log(`Procedural Level Generated! Beats: ${beats.length}, Collectibles: ${this.totalCollectibles}`);
@@ -3244,9 +3271,9 @@ class ScubaFlowScene extends Phaser.Scene {
 
         let events = [];
 
-        // 1. Flow milestones (every flowMilestoneInterval up to levelLengthMs + 2000)
+        // 1. Flow milestones (every flowMilestoneInterval up to songLengthMs + 2000)
         let interval = this.flowMilestoneInterval || 10000;
-        let totalDuration = this.levelData.levelLengthMs + 2000;
+        let totalDuration = this.levelData.songLengthMs + 2000;
         for (let t = interval; t <= totalDuration; t += interval) {
             events.push({
                 type: 'flow',
@@ -3256,6 +3283,7 @@ class ScubaFlowScene extends Phaser.Scene {
 
         // 2. Collectible collection events
         for (let col of sortedCollectibles) {
+            if (col.time > this.levelData.songLengthMs) continue;
             // Player starts at x=250.
             // Collectible at col.time is at colX = (col.time / 1000) * baseScrollSpeed.
             // Player reaches it at tReach = col.time - (250 / baseScrollSpeed) * 1000.
