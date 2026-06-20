@@ -10,8 +10,6 @@ class PsychedelicFX extends Phaser.Renderer.WebGL.Pipelines.PostFXPipeline {
                 #define SHADER_NAME PSYCHEDELIC_FS
                 precision mediump float;
                 uniform sampler2D uMainSampler;
-                uniform float uBloomIntensity;
-                uniform float uBloomRadius;
                 uniform float uChromaticOffset;
                 varying vec2 outTexCoord;
                 
@@ -25,45 +23,15 @@ class PsychedelicFX extends Phaser.Renderer.WebGL.Pipelines.PostFXPipeline {
                     float b = texture2D(uMainSampler, bCoord).b;
                     float a = texture2D(uMainSampler, outTexCoord).a;
                     
-                    vec4 color = vec4(r, g, b, a);
-                    
-                    // 2. Multiplier-scaled Bloom (bright-pass radial blur)
-                    if (uBloomIntensity > 0.0) {
-                        vec4 sum = vec4(0.0);
-                        float totalWeight = 0.0;
-                        for (int x = -3; x <= 3; x++) {
-                            for (int y = -3; y <= 3; y++) {
-                                vec2 offset = vec2(float(x), float(y)) * uBloomRadius;
-                                float br = texture2D(uMainSampler, rCoord + offset).r;
-                                float bg = texture2D(uMainSampler, outTexCoord + offset).g;
-                                float bb = texture2D(uMainSampler, bCoord + offset).b;
-                                vec4 tex = vec4(br, bg, bb, 1.0);
-                                
-                                float brightness = dot(tex.rgb, vec3(0.2126, 0.7152, 0.0722));
-                                float weight = 1.0 - (length(vec2(x, y)) / 5.0);
-                                if (weight > 0.0) {
-                                    sum += tex * step(0.25, brightness) * weight;
-                                    totalWeight += weight;
-                                }
-                            }
-                        }
-                        if (totalWeight > 0.0) {
-                            color.rgb += (sum.rgb / totalWeight) * uBloomIntensity;
-                        }
-                    }
-                    gl_FragColor = color;
+                    gl_FragColor = vec4(r, g, b, a);
                 }
             `
         });
-        this.bloomIntensity = 0.0;
-        this.bloomRadius = 0.0015;
         this.chromaticOffset = 0.0;
         this.chromaticOffsetStart = 0.0;
     }
     
     onPreRender() {
-        this.set1f('uBloomIntensity', this.bloomIntensity);
-        this.set1f('uBloomRadius', this.bloomRadius);
         this.set1f('uChromaticOffset', this.chromaticOffset);
     }
 }
@@ -196,6 +164,16 @@ class ScubaFlowScene extends Phaser.Scene {
             padding: { x: 8, y: 4 }
         }).setOrigin(0.5).setDepth(20).setVisible(false);
 
+        // Create in-game progress HUD
+        this.progressHUD = this.add.text(1185, 15, "", {
+            fontFamily: 'Outfit',
+            fontSize: '15px',
+            color: '#cbd5e1',
+            fontStyle: 'bold',
+            backgroundColor: 'rgba(2, 5, 20, 0.45)',
+            padding: { x: 8, y: 4 }
+        }).setOrigin(1, 0).setDepth(100).setScrollFactor(0).setVisible(false);
+
         // 6. Setup Graphics layers
         this.parallaxFarGraphics = this.add.graphics().setDepth(-2).setScrollFactor(0);  // farthest layer (slowest) — screen-space so it tiles left correctly
         this.parallaxNearGraphics = this.add.graphics().setDepth(-1); // near layer (faster)
@@ -316,9 +294,9 @@ class ScubaFlowScene extends Phaser.Scene {
                                 }
                             }
 
-                            // Initialize Bioluminescent Marine Snow Motes (80 screen-space motes)
+                            // Initialize Bioluminescent Marine Snow Motes (40 screen-space motes)
                             this.marineSnowMotes = [];
-                            for (let i = 0; i < 80; i++) {
+                            for (let i = 0; i < 40; i++) {
                                 this.marineSnowMotes.push({
                                     x: Math.random() * 1200,
                                     y: Math.random() * 700,
@@ -436,6 +414,7 @@ class ScubaFlowScene extends Phaser.Scene {
                 console.log("Countdown complete. Starting setupAudioEngine...");
                 this.setupAudioEngine(ctx);
                 console.log("setupAudioEngine completed.");
+                this.showTrackStartOverlay();
             }
         };
 
@@ -804,8 +783,9 @@ class ScubaFlowScene extends Phaser.Scene {
             let lightnessBoost = 0.012;
             let targetZoom = 1.0;
             if (this.scoreMultiplier >= 8) {
-                lightnessBoost += pulse * 0.022 * multiBeat;
-                targetZoom += pulse * 0.012 * multiBeat;
+                // Softened beat flash & zoom throb to keep it energetic but not overwhelming
+                lightnessBoost += pulse * 0.010 * multiBeat;
+                targetZoom += pulse * 0.005 * multiBeat;
             }
             
             let bgColorObj = Phaser.Display.Color.HSLToColor(bgHue / 360, 0.7, lightnessBoost);
@@ -907,19 +887,38 @@ class ScubaFlowScene extends Phaser.Scene {
                 this.scrollSpeed = Phaser.Math.Linear(this.scrollSpeed, this.baseScrollSpeed, physDt * 2.5);
             }
 
-            // Update WebGL PostFX shader parameters (Bloom & Chromatic Split)
+            // Update WebGL PostFX shader parameters (Chromatic Split)
             let fx = this.cameras.main.getPostPipeline(PsychedelicFX);
             if (fx) {
-                // Bloom intensity scales with multiplier: 0 at x1 up to 0.85 at x8 - gradual power curve
-                let targetBloom = Math.pow((this.scoreMultiplier - 1) / 7.0, 1.5) * 0.85;
-                fx.bloomIntensity = Phaser.Math.Linear(fx.bloomIntensity, targetBloom, physDt * 4.0);
-                
                 // Chromatic split decays in sync with silt time
                 if (this.siltActive && this.currentSiltDuration > 0) {
                     fx.chromaticOffset = (fx.chromaticOffsetStart || 0.02) * Math.max(0, this.siltTime / this.currentSiltDuration);
                 } else {
                     fx.chromaticOffset = 0;
                 }
+            }
+
+            // Update in-game progress HUD in upper-right corner
+            if (window.showGameplayHUD && !this.countdownActive && this.isPlaying && !this.isFadingOut && !this.isLevelCompleted) {
+                let trackName = window.customTrackName || "Track";
+                let elapsedSec = Math.floor(this.elapsedTime / 1000);
+                let durationSec = Math.floor(this.levelData.songLengthMs / 1000);
+                
+                let curMin = Math.floor(elapsedSec / 60);
+                let curSec = Math.floor(elapsedSec % 60);
+                let durMin = Math.floor(durationSec / 60);
+                let durSec = Math.floor(durationSec % 60);
+                
+                let progressStr = `${curMin}:${curSec.toString().padStart(2, '0')} / ${durMin}:${durSec.toString().padStart(2, '0')}`;
+                
+                let currentZone = this.getCurrentDepthZone();
+                let colorStr = currentZone ? Phaser.Display.Color.IntegerToColor(currentZone.ceilColor).toCSS() : '#00f0ff';
+                
+                this.progressHUD.setText(`${trackName.toUpperCase()} | ${progressStr}`);
+                this.progressHUD.setColor(colorStr);
+                this.progressHUD.setVisible(true);
+            } else {
+                this.progressHUD.setVisible(false);
             }
 
             // Score multiplier logic (avoiding silt-outs increases multiplier dynamically)
@@ -2317,8 +2316,16 @@ class ScubaFlowScene extends Phaser.Scene {
                     let emitChance = 0.06 + (mult - 1) * 0.02;    // x1: 0.06, x8: 0.20
                     
                     this.plumeEmitter.particleTint = plumeColor;
-                    this.plumeEmitter.setScale({ start: ventScaleStart, end: ventScaleEnd });
-                    this.plumeEmitter.setAlpha({ start: ventAlpha, end: 0 });
+                    if (this.plumeEmitter.scaleX) {
+                        this.plumeEmitter.scaleX.start = ventScaleStart;
+                        this.plumeEmitter.scaleX.end = ventScaleEnd;
+                        this.plumeEmitter.scaleY.start = ventScaleStart;
+                        this.plumeEmitter.scaleY.end = ventScaleEnd;
+                    }
+                    if (this.plumeEmitter.alpha) {
+                        this.plumeEmitter.alpha.start = ventAlpha;
+                        this.plumeEmitter.alpha.end = 0;
+                    }
                     
                     if (Math.random() < emitChance) {
                         this.plumeEmitter.emitParticleAt(cx, floorY);
@@ -3195,6 +3202,52 @@ class ScubaFlowScene extends Phaser.Scene {
         }, 2000);
     }
 
+    showTrackStartOverlay() {
+        let trackName = window.customTrackName || "Unknown Track";
+        let durationMs = this.levelData.songLengthMs || 0;
+        let minutes = Math.floor(durationMs / 60000);
+        let seconds = Math.floor((durationMs % 60000) / 1000);
+        let durationStr = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+
+        let currentZone = this.getCurrentDepthZone();
+        let colorStr = currentZone ? Phaser.Display.Color.IntegerToColor(currentZone.ceilColor).toCSS() : '#00f0ff';
+
+        let infoText = this.add.text(600, 260, `TRACK: ${trackName.toUpperCase()}`, {
+            fontFamily: 'Outfit',
+            fontSize: '32px',
+            fontStyle: 'bold',
+            color: colorStr,
+            align: 'center'
+        }).setOrigin(0.5).setDepth(100).setAlpha(0);
+
+        let durationText = this.add.text(600, 310, `DURATION: ${durationStr}`, {
+            fontFamily: 'Outfit',
+            fontSize: '20px',
+            color: '#cbd5e1',
+            align: 'center'
+        }).setOrigin(0.5).setDepth(100).setAlpha(0);
+
+        this.tweens.add({
+            targets: [infoText, durationText],
+            alpha: 1,
+            duration: 800,
+            ease: 'Power2',
+            onComplete: () => {
+                this.time.delayedCall(2200, () => {
+                    this.tweens.add({
+                        targets: [infoText, durationText],
+                        alpha: 0,
+                        duration: 800,
+                        onComplete: () => {
+                            infoText.destroy();
+                            durationText.destroy();
+                        }
+                    });
+                });
+            }
+        });
+    }
+
     levelComplete() {
         if (this.isLevelCompleted) return;
         this.isLevelCompleted = true;
@@ -3371,11 +3424,20 @@ class ScubaFlowScene extends Phaser.Scene {
 
         let titleText = isPerfect ? 'PERFECT FLOW' : 'DIVE COMPLETED';
 
+        let trackName = window.customTrackName || "Custom Track";
+        let durationMs = this.levelData.songLengthMs || 0;
+        let minutes = Math.floor(durationMs / 60000);
+        let seconds = Math.floor((durationMs % 60000) / 1000);
+        let durationStr = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+
         let innerCard = document.createElement('div');
         innerCard.className = 'glass-card';
         innerCard.style.textAlign = 'center';
         innerCard.innerHTML = `
             <h1 style="${titleStyle}">${titleText}</h1>
+            <div style="font-size: 0.9rem; color: #94a3b8; margin-top: -10px; margin-bottom: 15px; font-weight: 500; letter-spacing: 1px;">
+                ${trackName.toUpperCase()} (${durationStr})
+            </div>
             <div style="margin-bottom: 20px; display: flex; justify-content: center; align-items: center;">
                 ${starString}
             </div>

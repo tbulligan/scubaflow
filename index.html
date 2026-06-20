@@ -485,9 +485,6 @@
                 </div>
                 <div id="yt-status" style="font-size:0.75rem;color:#64748b;margin-bottom:12px;min-height:1em;text-align:center;"></div>
                 
-                <!-- Interactive Waveform Launchpad Card -->
-                <canvas id="waveform-canvas" width="540" height="80" style="display:none; width: 100%; border-radius: 12px; margin-bottom: 16px; background: rgba(2, 5, 20, 0.6); border: 1px solid rgba(0, 240, 255, 0.2);"></canvas>
-
                 <!-- Autopilot / Music Visualizer Switch -->
                 <div class="switch-container" style="margin-bottom: 8px;">
                     <span class="switch-label" id="autopilot-label">Autopilot (Music Visualizer Mode)</span>
@@ -496,8 +493,20 @@
                         <span class="slider"></span>
                     </label>
                 </div>
-                <div style="font-size: 0.72rem; color: #94a3b8; opacity: 0.7; margin-bottom: 20px; text-transform: uppercase; letter-spacing: 1px;">
+                <div style="font-size: 0.72rem; color: #94a3b8; opacity: 0.7; margin-bottom: 12px; text-transform: uppercase; letter-spacing: 1px;">
                     Mutes game sounds to focus purely on your music track
+                </div>
+
+                <!-- Gameplay HUD Switch -->
+                <div class="switch-container" style="margin-bottom: 8px;">
+                    <span class="switch-label" id="hud-label">Show HUD during gameplay</span>
+                    <label class="toggle-switch" aria-labelledby="hud-label">
+                        <input type="checkbox" id="hud-checkbox">
+                        <span class="slider"></span>
+                    </label>
+                </div>
+                <div style="font-size: 0.72rem; color: #94a3b8; opacity: 0.7; margin-bottom: 20px; text-transform: uppercase; letter-spacing: 1px;">
+                    Displays track progress and duration in the upper-right corner
                 </div>
 
                 <button id="btn-dive" class="btn-dive" type="button" disabled style="opacity: 0.5; pointer-events: none;">Select a Music Track</button>
@@ -517,79 +526,16 @@
         window.customAudioBuffer = null;
         window.useAutopilot = false;
 
-        // Draw waveform from decoded audio buffer
-        async function drawWaveform(arrayBuffer) {
-            const canvas = document.getElementById('waveform-canvas');
-            canvas.style.display = 'block';
-            const ctx = canvas.getContext('2d');
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-            
-            // Draw loading state
-            ctx.fillStyle = '#94a3b8';
-            ctx.font = 'bold 12px Outfit';
-            ctx.textAlign = 'center';
-            ctx.fillText('GENERATING WAVEFORM...', canvas.width / 2, canvas.height / 2 + 4);
-            
-            try {
-                let AudioContextClass = window.AudioContext || window.webkitAudioContext;
-                let tempCtx = new AudioContextClass();
-                // Slice to avoid mutating original buffer
-                let decoded = await tempCtx.decodeAudioData(arrayBuffer.slice(0));
-                let channelData = decoded.getChannelData(0);
-                
-                let numPoints = 200;
-                let step = Math.floor(channelData.length / numPoints);
-                let peaks = [];
-                for (let i = 0; i < numPoints; i++) {
-                    let max = 0;
-                    for (let j = 0; j < step; j++) {
-                        let val = Math.abs(channelData[i * step + j]);
-                        if (val > max) max = val;
-                    }
-                    peaks.push(max);
-                }
-                
-                let maxPeak = Math.max(...peaks) || 1;
-                peaks = peaks.map(p => p / maxPeak);
-                
-                // Render stylized neon waveform
-                ctx.clearRect(0, 0, canvas.width, canvas.height);
-                
-                let grad = ctx.createLinearGradient(0, 0, canvas.width, 0);
-                grad.addColorStop(0, '#00f0ff');
-                grad.addColorStop(0.5, '#bd00ff');
-                grad.addColorStop(1, '#00f0ff');
-                
-                ctx.strokeStyle = grad;
-                ctx.lineWidth = 2.0;
-                ctx.lineCap = 'round';
-                ctx.beginPath();
-                
-                let width = canvas.width;
-                let height = canvas.height;
-                let sliceWidth = width / numPoints;
-                
-                for (let i = 0; i < numPoints; i++) {
-                    let x = i * sliceWidth + sliceWidth / 2;
-                    let yVal = peaks[i] * (height * 0.7);
-                    let y = (height - yVal) / 2;
-                    ctx.moveTo(x, y);
-                    ctx.lineTo(x, y + yVal);
-                }
-                ctx.stroke();
-                canvas.style.boxShadow = '0 0 20px rgba(0, 240, 255, 0.25)';
-                tempCtx.close();
-            } catch (err) {
-                console.error("Waveform error:", err);
-                ctx.clearRect(0, 0, canvas.width, canvas.height);
-                ctx.fillStyle = '#ff1e56';
-                ctx.fillText('WAVEFORM PREVIEW UNAVAILABLE', canvas.width / 2, canvas.height / 2 + 4);
-            }
-        }
+        window.showGameplayHUD = false;
 
         // Autopilot Switch Logic
         document.getElementById('autopilot-checkbox').addEventListener('change', (e) => {
             window.useAutopilot = e.target.checked;
+        });
+
+        // HUD Switch Logic
+        document.getElementById('hud-checkbox').addEventListener('change', (e) => {
+            window.showGameplayHUD = e.target.checked;
         });
 
         // Custom Audio Loading Logic
@@ -602,13 +548,11 @@
                 const reader = new FileReader();
                 reader.onload = (event) => {
                     window.customAudioBuffer = event.target.result; // Store as ArrayBuffer
+                    window.customTrackName = file.name; // Store track name
                     fileLabelText.textContent = `✅ Loaded: ${file.name}`;
                     fileLabelText.style.borderColor = '#00f0ff';
                     fileLabelText.style.color = '#00f0ff';
                     
-                    // Render waveform
-                    drawWaveform(event.target.result);
-
                     // Enable the button!
                     const btn = document.getElementById('btn-dive');
                     btn.removeAttribute('disabled');
@@ -643,11 +587,18 @@
                 }
                 const arrayBuffer = await resp.arrayBuffer();
                 window.customAudioBuffer = arrayBuffer;
+                
+                // Parse clean track name from URL
+                let trackName = 'YouTube Audio';
+                try {
+                    let parsedUrl = new URL(url);
+                    let videoId = parsedUrl.searchParams.get('v');
+                    if (videoId) trackName = `YouTube Video (${videoId})`;
+                } catch(e) {}
+                window.customTrackName = trackName;
+                
                 status.textContent = '✅ Audio ready! Click Begin Dive.';
                 status.style.color = '#00f0ff';
-
-                // Render waveform
-                drawWaveform(arrayBuffer);
 
                 const btn = document.getElementById('btn-dive');
                 btn.removeAttribute('disabled');
