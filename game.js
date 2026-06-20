@@ -379,7 +379,7 @@ class ScubaFlowScene extends Phaser.Scene {
         this.elapsedTime = 0;
         this.isPlaying = true; // allow update loop to render the starting scene
 
-        let countdownNumbers = ['3', '2', '1', 'NEON-FLOW!'];
+        let countdownNumbers = ['3', '2', '1', 'FLOW!'];
         let colors = ['#bd00ff', '#00f0ff', '#ff007f', '#00ff66'];
         let index = 0;
 
@@ -401,7 +401,7 @@ class ScubaFlowScene extends Phaser.Scene {
                     osc.connect(gainNode);
                     gainNode.connect(ctx.destination);
                     osc.type = 'sine';
-                    if (numStr === 'NEON-FLOW!') {
+                    if (numStr === 'FLOW!') {
                         osc.frequency.setValueAtTime(440, ctx.currentTime);
                         osc.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 0.25);
                         gainNode.gain.setValueAtTime(0.15, ctx.currentTime);
@@ -910,8 +910,8 @@ class ScubaFlowScene extends Phaser.Scene {
             // Update WebGL PostFX shader parameters (Bloom & Chromatic Split)
             let fx = this.cameras.main.getPostPipeline(PsychedelicFX);
             if (fx) {
-                // Bloom intensity scales with multiplier: 0 at x1 up to 1.2 at x8
-                let targetBloom = Math.max(0.0, Math.min(1.2, (this.scoreMultiplier - 1) / 7.0 * 1.2));
+                // Bloom intensity scales with multiplier: 0 at x1 up to 0.85 at x8 - gradual power curve
+                let targetBloom = Math.pow((this.scoreMultiplier - 1) / 7.0, 1.5) * 0.85;
                 fx.bloomIntensity = Phaser.Math.Linear(fx.bloomIntensity, targetBloom, physDt * 4.0);
                 
                 // Chromatic split decays in sync with silt time
@@ -932,11 +932,11 @@ class ScubaFlowScene extends Phaser.Scene {
                         this.scoreMultiplier++;
                         let bonusPoints = 50 * this.scoreMultiplier;
                         this.pointsScore += bonusPoints;
-                        this.spawnFloatingText(this.player.x, this.player.y - 35, `NEON-FLOW x${this.scoreMultiplier}! +${bonusPoints}`, '#00ff66');
+                        this.spawnFloatingText(this.player.x, this.player.y - 35, `FLOW x${this.scoreMultiplier}! +${bonusPoints}`, '#00ff66');
                     } else {
                         let bonusPoints = 50 * this.scoreMultiplier;
                         this.pointsScore += bonusPoints;
-                        this.spawnFloatingText(this.player.x, this.player.y - 35, `MAX NEON-FLOW! +${bonusPoints}`, '#00f0ff');
+                        this.spawnFloatingText(this.player.x, this.player.y - 35, `MAX FLOW! +${bonusPoints}`, '#00f0ff');
                         this.triggerMaxFlowPulse();
                     }
                 }
@@ -1222,8 +1222,8 @@ class ScubaFlowScene extends Phaser.Scene {
             return { floorY, ceilY };
         };
 
-        // flowFill: 0 at multiplier x1 (wireframe), 1 at multiplier x8 (full solid neon)
-        let flowFill = Math.min(1.0, (this.scoreMultiplier - 1) / 7);
+        // flowFill: 0 at multiplier x1 (wireframe), 1 at multiplier x8 (full solid neon) - gradual power curve
+        let flowFill = Math.pow((this.scoreMultiplier - 1) / 7.0, 1.5);
 
         // --- FAR layer (10% relative speed, screen-space) ---
         // Far layer is visibly FAINTER than the near layer — lower lum and lower alpha.
@@ -1402,7 +1402,7 @@ class ScubaFlowScene extends Phaser.Scene {
         bgG.clear();
 
         let flowSat = this.siltActive ? 0.15 : Math.min(1.0, 0.45 + (this.scoreMultiplier - 1) * 0.08);
-        let flowLightBoost = this.siltActive ? -0.15 : Math.min(0.25, (this.scoreMultiplier - 1) * 0.035);
+        let flowLightBoost = this.siltActive ? -0.15 : Math.min(0.12, (this.scoreMultiplier - 1) * 0.017);
 
         for (let r of this.beatRipples) {
             let hue = (this.baseHue + r.radius * 0.15) % 360;
@@ -1478,7 +1478,7 @@ class ScubaFlowScene extends Phaser.Scene {
 
         // Dynamic flow-state color popping based on silt-free multiplier
         let flowSat = this.siltActive ? 0.15 : Math.min(1.0, 0.45 + (this.scoreMultiplier - 1) * 0.08);
-        let flowLightBoost = this.siltActive ? -0.15 : Math.min(0.25, (this.scoreMultiplier - 1) * 0.035);
+        let flowLightBoost = this.siltActive ? -0.15 : Math.min(0.12, (this.scoreMultiplier - 1) * 0.017);
 
         let playerHue = (this.baseHue + 320) % 360; // Pink/Magenta base (distinct from buddy)
         let mainColor = Phaser.Display.Color.HSLToColor(playerHue / 360, flowSat, 0.55 + flowLightBoost).color;
@@ -1822,7 +1822,7 @@ class ScubaFlowScene extends Phaser.Scene {
 
         // Dynamic flow-state color popping based on silt-free multiplier
         let flowSat = this.siltActive ? 0.15 : Math.min(1.0, 0.45 + (this.scoreMultiplier - 1) * 0.08);
-        let flowLightBoost = this.siltActive ? -0.15 : Math.min(0.25, (this.scoreMultiplier - 1) * 0.035);
+        let flowLightBoost = this.siltActive ? -0.15 : Math.min(0.12, (this.scoreMultiplier - 1) * 0.017);
 
         // Cycle the buddy neon color (complementary hue)
         let buddyHue = (this.baseHue + 180) % 360; // Cyan base (distinct from player)
@@ -2041,7 +2041,7 @@ class ScubaFlowScene extends Phaser.Scene {
         let stepX = (beamLength / steps) * dir;
 
         let flowSat = this.siltActive ? 0.15 : Math.min(1.0, 0.45 + (this.scoreMultiplier - 1) * 0.08);
-        let flowLightBoost = this.siltActive ? -0.15 : Math.min(0.25, (this.scoreMultiplier - 1) * 0.035);
+        let flowLightBoost = this.siltActive ? -0.15 : Math.min(0.12, (this.scoreMultiplier - 1) * 0.017);
 
         let lightCol = Phaser.Display.Color.HSLToColor(Phaser.Display.Color.IntegerToColor(accentColor).h, flowSat, 0.65 + flowLightBoost).color;
 
@@ -2191,14 +2191,14 @@ class ScubaFlowScene extends Phaser.Scene {
 
         // Dynamic flow-state color popping based on silt-free multiplier
         let flowSat = this.siltActive ? 0.15 : Math.min(1.0, 0.45 + (this.scoreMultiplier - 1) * 0.08);
-        let flowLightBoost = this.siltActive ? -0.15 : Math.min(0.25, (this.scoreMultiplier - 1) * 0.035);
+        let flowLightBoost = this.siltActive ? -0.15 : Math.min(0.12, (this.scoreMultiplier - 1) * 0.017);
 
-        // flowFill: 0 = wireframe (multiplier x1), 1 = fully solid neon (multiplier x8+)
-        let flowFill = Math.min(1.0, (this.scoreMultiplier - 1) / 7);
+        // flowFill: 0 = wireframe (multiplier x1), 1 = fully solid neon (multiplier x8+) - gradual power curve
+        let flowFill = Math.pow((this.scoreMultiplier - 1) / 7.0, 1.5);
 
         // At high flow, walls use full neon saturation; at low flow, muted
         let wallSat = this.siltActive ? 0.15 : Math.min(1.0, flowSat + flowFill * 0.3);
-        let wallLum = Math.min(0.75, (0.5 + flowLightBoost) + flowFill * 0.15);
+        let wallLum = Math.min(0.60, (0.42 + flowLightBoost) + flowFill * 0.08);
         let floorColor = Phaser.Display.Color.HSLToColor(floorHue / 360, wallSat, wallLum).color;
         let ceilColor = Phaser.Display.Color.HSLToColor(ceilHue / 360, wallSat, wallLum).color;
 
@@ -2304,12 +2304,23 @@ class ScubaFlowScene extends Phaser.Scene {
                 let cx = slot * SLOT_SIZE + this._seededRnd(seed + 1) * SLOT_SIZE * 0.9 - SLOT_SIZE * 0.45;
                 let { floorY } = getWallY(cx);
 
-                // Map specific particle emission anchor points to floor crack offsets
+                // Map specific particle emission anchor points to floor crack offsets (active during countdown & dynamic scaling)
                 if (this.plumeEmitter && this._seededRnd(seed + 12) < 0.4) {
                     let plumeHue = (floorHue + 20) % 360;
                     let plumeColor = Phaser.Display.Color.HSLToColor(plumeHue / 360, 0.9, 0.6).color;
+                    
+                    // Dynamic scaling of vents based on Flow multiplier
+                    let mult = this.scoreMultiplier || 1;
+                    let ventScaleStart = 1.0 + (mult - 1) * 0.3; // x1: 1.0, x8: 3.1
+                    let ventScaleEnd = 2.5 + (mult - 1) * 1.0;   // x1: 2.5, x8: 9.5
+                    let ventAlpha = 0.06 + (mult - 1) * 0.02;    // x1: 0.06, x8: 0.20
+                    let emitChance = 0.06 + (mult - 1) * 0.02;    // x1: 0.06, x8: 0.20
+                    
                     this.plumeEmitter.particleTint = plumeColor;
-                    if (Math.random() < 0.12) {
+                    this.plumeEmitter.setScale({ start: ventScaleStart, end: ventScaleEnd });
+                    this.plumeEmitter.setAlpha({ start: ventAlpha, end: 0 });
+                    
+                    if (Math.random() < emitChance) {
                         this.plumeEmitter.emitParticleAt(cx, floorY);
                     }
                 }
@@ -2821,7 +2832,7 @@ class ScubaFlowScene extends Phaser.Scene {
             this.currentSiltDuration = currentDuration;
             if (this.scoreMultiplier > 1) {
                 this.scoreMultiplier = 1;
-                this.spawnFloatingText(this.player.x, this.player.y - 35, "NEON-FLOW RESET", '#ff1e56');
+                this.spawnFloatingText(this.player.x, this.player.y - 35, "FLOW RESET", '#ff1e56');
             } else {
                 this.scoreMultiplier = 1;
             }
@@ -3313,7 +3324,7 @@ class ScubaFlowScene extends Phaser.Scene {
         
         let careerHTML = `
             <div style="margin: 20px 0; padding: 12px 16px; background: rgba(0, 240, 255, 0.03); border: 1px solid rgba(0, 240, 255, 0.1); border-radius: 12px; text-align: left; font-size: 0.85rem; color: #94a3b8; line-height: 1.6;">
-                <div style="font-weight: bold; color: #cbd5e1; margin-bottom: 6px; letter-spacing: 1px; text-transform: uppercase;">LIFETIME NEON-FLOW CAREER:</div>
+                <div style="font-weight: bold; color: #cbd5e1; margin-bottom: 6px; letter-spacing: 1px; text-transform: uppercase;">LIFETIME FLOW CAREER:</div>
                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
                     <div>⏱ Time Drifting: <strong style="color: #e2e8f0;">${formattedTime}</strong></div>
                     <div>🫧 Bubbles Blown: <strong style="color: #e2e8f0;">${career.lifetimeBubblesBlown}</strong></div>
@@ -3358,7 +3369,7 @@ class ScubaFlowScene extends Phaser.Scene {
             ? 'background: linear-gradient(135deg, #00f0ff 0%, #ff00e4 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-size: 3.6rem; font-weight: 800; margin-bottom: 20px; letter-spacing: 3px; filter: drop-shadow(0 0 10px rgba(0, 240, 255, 0.6));'
             : 'background: linear-gradient(135deg, #00f0ff 0%, #bd00ff 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-size: 3rem; font-weight: 700; margin-bottom: 20px; letter-spacing: 2px;';
 
-        let titleText = isPerfect ? 'PERFECT NEON-FLOW' : 'DIVE COMPLETED';
+        let titleText = isPerfect ? 'PERFECT FLOW' : 'DIVE COMPLETED';
 
         let innerCard = document.createElement('div');
         innerCard.className = 'glass-card';
