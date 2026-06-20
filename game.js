@@ -320,7 +320,6 @@ class ScubaFlowScene extends Phaser.Scene {
             }
 
             // 2. Process Input & Buoyancy State
-            let lastY = this.player.y;
             if (this.useAutopilot) {
                 // Autopilot target calculation: find nearest active debris ahead of player
                 let px = this.player.x;
@@ -336,7 +335,8 @@ class ScubaFlowScene extends Phaser.Scene {
                     this.collectiblesGroup.children.iterate((debris) => {
                         if (debris && debris.active) {
                             let dx = debris.x - px;
-                            if (dx > -10 && dx < lookAheadDistance) {
+                            // Target collectibles at least 25px ahead to allow smooth steering lead-time
+                            if (dx > 25 && dx < lookAheadDistance) {
                                 if (dx < minDistanceX) {
                                     minDistanceX = dx;
                                     nearestCollectible = debris;
@@ -377,44 +377,24 @@ class ScubaFlowScene extends Phaser.Scene {
                     targetY = Phaser.Math.Clamp(targetY, minYAllowed, maxYAllowed);
                 }
 
-                // Proportional-Derivative (PD) controller to calculate target V_lung organically
+                // PD controller deciding whether to simulate spaceDown (inhale)
                 let errorY = targetY - this.player.y;
-                let targetV = 0.5 - (errorY * 0.015 - this.vy * 0.005);
-                this.V_lung = Phaser.Math.Clamp(targetV, 0.0, 1.0);
+                let controlSignal = -errorY * 0.015 + this.vy * 0.006;
+                this.simulatedSpaceDown = (controlSignal > 0.0);
+            }
 
-                // Run standard buoyancy physics simulation to keep movement organic and flowing
-                this.buoyancySmooth += (this.V_lung - this.buoyancySmooth) * dt * 4.5;
-                let ay = (this.buoyancySmooth - 0.5) * -600;
-
-                this.vy += ay * dt;
-                this.vy *= Math.exp(-this.dragCoeff * dt);
-                this.player.y += this.vy * dt;
-
-                // Directly clamp the final player position to safe boundaries to prevent any silt-outs
-                if (minYAllowed <= maxYAllowed) {
-                    this.player.y = Phaser.Math.Clamp(this.player.y, minYAllowed, maxYAllowed);
-                } else {
-                    this.player.y = (minYAllowed + maxYAllowed) / 2;
-                }
-
-                // Update vy post-clamp for visual/audio effects
-                this.vy = (this.player.y - lastY) / dt;
-
-                // Sync simulated input state for bubbles and sound triggers
-                this.simulatedSpaceDown = (this.V_lung > 0.5);
+            // Standard input & lung volume simulation (shared between manual & autopilot)
+            let spaceDown = this.useAutopilot ? this.simulatedSpaceDown : this.spaceKey.isDown;
+            let fillRate = 3.0;
+            if (spaceDown) {
+                this.V_lung = Math.min(1.0, this.V_lung + fillRate * dt);
             } else {
-                let fillRate = 3.0;
-                if (this.spaceKey.isDown) {
-                    this.V_lung = Math.min(1.0, this.V_lung + fillRate * dt);
-                } else {
-                    this.V_lung = Math.max(0.0, this.V_lung - fillRate * dt);
-                }
+                this.V_lung = Math.max(0.0, this.V_lung - fillRate * dt);
             }
 
             // Audio Breathing Volumes
             let ctx = this.audioContext;
             if (ctx) {
-                let spaceDown = this.useAutopilot ? this.simulatedSpaceDown : this.spaceKey.isDown;
                 if (spaceDown) {
                     this.inhaleGain.gain.setTargetAtTime(0.10, ctx.currentTime, 0.05);
                     this.exhaleGain.gain.setTargetAtTime(0.0, ctx.currentTime, 0.05);
@@ -453,13 +433,46 @@ class ScubaFlowScene extends Phaser.Scene {
             }
 
             // 3. Simplified Buoyancy Physics
-            if (!this.useAutopilot) {
-                this.buoyancySmooth += (this.V_lung - this.buoyancySmooth) * dt * 4.5;
-                let ay = (this.buoyancySmooth - 0.5) * -600; // Damped to ±300 px/s² for fine steering
+            let lastY = this.player.y;
+            this.buoyancySmooth += (this.V_lung - this.buoyancySmooth) * dt * 4.5;
+            let ay = (this.buoyancySmooth - 0.5) * -600; // Damped to ±300 px/s² for fine steering
 
-                this.vy += ay * dt;
-                this.vy *= Math.exp(-this.dragCoeff * dt);
-                this.player.y += this.vy * dt;
+            this.vy += ay * dt;
+            this.vy *= Math.exp(-this.dragCoeff * dt);
+            this.player.y += this.vy * dt;
+
+            // Strict position-clamping for Autopilot to guarantee 100% no silt-outs
+            if (this.useAutopilot) {
+                let px = this.player.x;
+                let minYAllowed = -9999;
+                let maxYAllowed = 9999;
+                let safetyMargin = 12;
+
+                for (let pt of checkPoints) {
+                    let wx = px + pt.x;
+                    let ptTime = (wx / this.baseScrollSpeed) * 1000;
+                    let ptPathY = this.getTargetYAtTime(ptTime);
+                    let ptEnergy = this.getEnergyAtTime(ptTime);
+                    let { floorOffset, ceilOffset } = this.getWallOffsets(wx, ptEnergy);
+                    let ptFloorY = ptPathY + floorOffset;
+                    let ptCeilY = ptPathY - ceilOffset;
+
+                    if (pt.ceil !== false) {
+                        minYAllowed = Math.max(minYAllowed, ptCeilY - pt.y + pt.r + safetyMargin);
+                    }
+                    if (pt.floor !== false) {
+                        maxYAllowed = Math.min(maxYAllowed, ptFloorY - pt.y - pt.r - safetyMargin);
+                    }
+                }
+
+                if (minYAllowed <= maxYAllowed) {
+                    this.player.y = Phaser.Math.Clamp(this.player.y, minYAllowed, maxYAllowed);
+                } else {
+                    this.player.y = (minYAllowed + maxYAllowed) / 2;
+                }
+
+                // Update vy post-clamp for visual/audio effects
+                this.vy = (this.player.y - lastY) / dt;
             }
 
             // 4. Cave Boundaries & Local Energy Calculation
