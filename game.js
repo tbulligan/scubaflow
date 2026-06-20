@@ -21,6 +21,11 @@ class ScubaFlowScene extends Phaser.Scene {
         this.vy = 0; // vertical velocity
         this.dragCoeff = 2.4; // Responsive drag
 
+        // Buddy Physics State
+        this.buddyVy = 0;
+        this.buddyV_lung = 0.5;
+        this.buddyBuoyancySmooth = 0.5;
+
         // Psychedelic Visuals & Music-Reactive Systems
         this.score = 0;
         this.totalCollectibles = 0;
@@ -643,7 +648,20 @@ class ScubaFlowScene extends Phaser.Scene {
 
             let buddyLeadTime = this.elapsedTime + (this.buddy.x - this.player.x) / this.baseScrollSpeed * 1000;
             let buddyTargetY = this.getTargetYAtTime(buddyLeadTime);
-            this.buddy.y = Phaser.Math.Linear(this.buddy.y, buddyTargetY, 1 - Math.exp(-4 * dt));
+
+            // PD controller for buddy buoyancy (keeping buddy silent: no audio synthesizer, chest scaling, or bubble triggers)
+            let lastBuddyY = this.buddy.y;
+            let buddyErrorY = buddyTargetY - this.buddy.y;
+            let buddyTargetV = 0.5 - (buddyErrorY * 0.015 - this.buddyVy * 0.006);
+            this.buddyV_lung = Phaser.Math.Clamp(buddyTargetV, 0.0, 1.0);
+
+            // Buddy buoyancy physics simulation
+            this.buddyBuoyancySmooth += (this.buddyV_lung - this.buddyBuoyancySmooth) * dt * 4.5;
+            let buddyAy = (this.buddyBuoyancySmooth - 0.5) * -600;
+
+            this.buddyVy += buddyAy * dt;
+            this.buddyVy *= Math.exp(-this.dragCoeff * dt);
+            this.buddy.y += this.buddyVy * dt;
 
             // Clamp buddy tightly to safety zone borders so buddy never touches wall or raises sediment
             let scaleX = this.buddy.scaleX || 1;
@@ -678,6 +696,9 @@ class ScubaFlowScene extends Phaser.Scene {
             } else {
                 this.buddy.y = (minYAbsolute + maxYAbsolute) / 2;
             }
+
+            // Update buddyVy post-clamp to keep physics state in sync
+            this.buddyVy = (this.buddy.y - lastBuddyY) / dt;
 
             // 8. Silt Recovery timer & Scroll Speed Slowdown
             if (this.siltActive) {
