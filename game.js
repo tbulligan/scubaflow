@@ -132,7 +132,6 @@ class ScubaFlowScene extends Phaser.Scene {
         this.parallaxNearGraphics = this.add.graphics().setDepth(-1); // near layer (faster)
         this.backgroundGraphics = this.add.graphics();
         this.terrainGraphics = this.add.graphics();
-        this.guideLineGraphics = this.add.graphics().setDepth(13); // Render on top of silt overlay as a visible lifeline
         this.lightGraphics = this.add.graphics();
         this.lightGraphics.setDepth(5);
         this.siltOverlay = this.add.graphics();
@@ -1913,8 +1912,7 @@ class ScubaFlowScene extends Phaser.Scene {
     }
 
     drawGuideLine() {
-        let g = this.guideLineGraphics;
-        if (g) g.clear();
+        let g = this.terrainGraphics; // Draw on the terrain layer so it integrates nicely
         if (!this.buddy) return;
 
         let bDir = this.buddy.scaleX;
