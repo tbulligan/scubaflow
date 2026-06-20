@@ -361,12 +361,19 @@ class ScubaFlowScene extends Phaser.Scene {
                 this.elapsedTime = 0;
                 this.player.x = 250;
                 this.buddy.x = 550;
-                
+
                 let buddyStartY = this.getTargetYAtTime((550 / this.baseScrollSpeed) * 1000);
                 this.buddy.y = buddyStartY;
 
                 let playerStartY = this.getTargetYAtTime((250 / this.baseScrollSpeed) * 1000);
                 this.player.y = playerStartY;
+
+                // Simulate normal breathing cycle for player visuals during countdown
+                let breathPeriod = 3600;
+                let breathPhase = (time % breathPeriod) / breathPeriod;
+                this.V_lung = 0.5 + 0.3 * Math.sin(breathPhase * Math.PI * 2);
+
+                this.emitBreathingParticles();
 
                 // Redraw visualizers and terrain so everything is visible
                 this.drawParallax(time);
@@ -391,12 +398,9 @@ class ScubaFlowScene extends Phaser.Scene {
             let deltaMs = dt * 1000;
             let physDt = Math.min(dt, 0.15); // cap physics step to prevent physics engine explosions
 
-            // Clamp player X position at targetEndX and wait for music to finish
-            if (this.player.x >= this.targetEndX) {
-                this.player.x = this.targetEndX;
-                if ((this.musicCompleted || this.elapsedTime >= this.levelData.songLengthMs) && !this.isFadingOut) {
-                    this.startFadeout();
-                }
+            // Start fadeout when player reaches targetEndX, track completes, or time runs out
+            if ((this.player.x >= this.targetEndX || this.musicCompleted || this.elapsedTime >= this.levelData.songLengthMs) && !this.isFadingOut) {
+                this.startFadeout();
             }
 
 
@@ -418,12 +422,12 @@ class ScubaFlowScene extends Phaser.Scene {
                 let foot1Y = 2 - (12 - kickExtension2 * 8) - (10 - kickExtension2 * 10);
 
                 checkPoints = [
-                    { x: 0,   y: 0,       r: 6.5,  floor: true,  ceil: true  }, // Torso center
-                    { x: 14,  y: -4,      r: 4,    floor: true,  ceil: true  }, // Head
-                    { x: -10, y: -13,     r: 2,    floor: false, ceil: true  }, // Tank tops (highest solid point)
-                    { x: 26,  y: -2,      r: 3,    floor: true,  ceil: true  }, // Light hand (forward-most)
-                    { x: foot1X, y: foot1Y, r: 4,    floor: true,  ceil: true  }, // Foot 1 — floor & ceiling
-                    { x: foot2X, y: foot2Y, r: 4,    floor: true,  ceil: true  }, // Foot 2 — floor & ceiling
+                    { x: 0, y: 0, r: 6.5, floor: true, ceil: true }, // Torso center
+                    { x: 14, y: -4, r: 4, floor: true, ceil: true }, // Head
+                    { x: -10, y: -13, r: 2, floor: false, ceil: true }, // Tank tops (highest solid point)
+                    { x: 26, y: -2, r: 3, floor: true, ceil: true }, // Light hand (forward-most)
+                    { x: foot1X, y: foot1Y, r: 4, floor: true, ceil: true }, // Foot 1 — floor & ceiling
+                    { x: foot2X, y: foot2Y, r: 4, floor: true, ceil: true }, // Foot 2 — floor & ceiling
                 ];
             } else {
                 checkPoints = [
@@ -474,7 +478,7 @@ class ScubaFlowScene extends Phaser.Scene {
                 // Glide player smoothly towards the target path (completely organic visualizer glide)
                 let lastY = this.player.y;
                 this.player.y = Phaser.Math.Linear(this.player.y, targetY, 1 - Math.exp(-6 * physDt));
-                
+
                 // Calculate simulated velocity
                 if (physDt > 0) {
                     this.vy = (this.player.y - lastY) / physDt;
@@ -972,7 +976,15 @@ class ScubaFlowScene extends Phaser.Scene {
         let dt = this.game.loop.delta / 1000;
 
         // 1. Exhale bubbles on spacebar release (lung volume shrinking)
-        let spaceDown = this.useAutopilot ? this.simulatedSpaceDown : this.spaceKey.isDown;
+        let spaceDown;
+        if (this.countdownActive) {
+            let breathPeriod = 3600;
+            let breathPhase = (this.time.now % breathPeriod) / breathPeriod;
+            spaceDown = (breathPhase < 0.5);
+        } else {
+            spaceDown = this.useAutopilot ? this.simulatedSpaceDown : this.spaceKey.isDown;
+        }
+
         if (!spaceDown && this.V_lung > 0.05) {
             if (Math.random() < 0.20) {
                 let rndHue = (this.baseHue + Math.random() * 60) % 360;
@@ -1140,7 +1152,7 @@ class ScubaFlowScene extends Phaser.Scene {
         {
             let nStep = 80;
             let nCount = Math.ceil(screenW / nStep) + 2;
-            let nBase  = Math.floor((camX * nearFactor) / nStep) * nStep;
+            let nBase = Math.floor((camX * nearFactor) / nStep) * nStep;
             // Ceiling band
             ng.beginPath();
             let nFirst = true;
@@ -1316,11 +1328,11 @@ class ScubaFlowScene extends Phaser.Scene {
                     let freq2 = 10 + a * 3;
                     let phase1 = angle * freq1 - (time * 0.005);
                     let phase2 = angle * freq2 + (time * 0.012);
-                    
+
                     let amp1 = 4 + pulse * 6;
                     let amp2 = 2 + pulse * 3;
                     let waveVal = Math.sin(phase1) * amp1 + (Math.abs(Math.sin(phase2)) - 0.5) * amp2 * 2;
-                    
+
                     // Modulate radius by localEnergy and flowState multiplier
                     let r = auraR + waveVal * (0.4 + this.localEnergy * 0.6);
                     let ax = Math.cos(angle) * r;
@@ -1366,22 +1378,22 @@ class ScubaFlowScene extends Phaser.Scene {
             // --- 2. DRAW DOUBLE TANKS (TWINSET - Cave diving standard horizontal trim) ---
             g.lineStyle(1.2, accentColor, 1);
             g.fillStyle(0x020514, 0.95);
-            
+
             // Tank 2 (upper cylinder in perspective)
             g.fillRoundedRect(-22, -16, 24, 6, 2);
             g.strokeRoundedRect(-22, -16, 24, 6, 2);
-            
+
             // Tank 1 (lower cylinder, closer to back)
             g.fillRoundedRect(-22, -11, 24, 6, 2);
             g.strokeRoundedRect(-22, -11, 24, 6, 2);
-            
+
             // Isolator Manifold connecting the two tanks at the valves (X = 2)
             g.lineStyle(1.5, accentColor, 1);
             g.beginPath();
             g.moveTo(2, -13);
             g.lineTo(2, -8);
             g.strokePath();
-            
+
             // Metal tank bands holding them together
             g.lineStyle(1.0, mainColor, 0.8);
             g.beginPath();
@@ -1669,20 +1681,20 @@ class ScubaFlowScene extends Phaser.Scene {
 
         // --- 2. DRAW DOUBLE TANKS (TWINSET - Wireframe style, horizontal trim) ---
         g.lineStyle(1.2, accentColor, 0.95);
-        
+
         // Tank 2 (upper cylinder in perspective)
         g.strokeRoundedRect(-22, -16, 24, 6, 2);
-        
+
         // Tank 1 (lower cylinder, closer to back)
         g.strokeRoundedRect(-22, -11, 24, 6, 2);
-        
+
         // Isolator Manifold connecting the two tanks at the valves
         g.lineStyle(1.5, accentColor, 0.95);
         g.beginPath();
         g.moveTo(2, -13);
         g.lineTo(2, -8);
         g.strokePath();
-        
+
         // Metal tank bands holding them together
         g.lineStyle(1.0, mainColor, 0.7);
         g.beginPath();
@@ -2005,7 +2017,7 @@ class ScubaFlowScene extends Phaser.Scene {
         let wallSat = this.siltActive ? 0.15 : Math.min(1.0, flowSat + flowFill * 0.3);
         let wallLum = Math.min(0.75, (0.5 + flowLightBoost) + flowFill * 0.15);
         let floorColor = Phaser.Display.Color.HSLToColor(floorHue / 360, wallSat, wallLum).color;
-        let ceilColor  = Phaser.Display.Color.HSLToColor(ceilHue  / 360, wallSat, wallLum).color;
+        let ceilColor = Phaser.Display.Color.HSLToColor(ceilHue / 360, wallSat, wallLum).color;
 
         let startX = this.cameras.main.scrollX - 100;
         let endX = startX + 1400;
@@ -2097,7 +2109,7 @@ class ScubaFlowScene extends Phaser.Scene {
         // --- Peppered Foreground Cracks on Player's Layer (Drawn in solid rock face with high variety) ---
         const SLOT_SIZE = 320;
         let firstSlot = Math.floor(startX / SLOT_SIZE);
-        let lastSlot  = Math.ceil(endX  / SLOT_SIZE);
+        let lastSlot = Math.ceil(endX / SLOT_SIZE);
         for (let slot = firstSlot; slot <= lastSlot; slot++) {
             // 1. Cracks on Floor rock face
             let numCracksF = Math.floor(1 + this._seededRnd(slot * 23 + 5) * 3); // 1, 2, or 3 cracks
@@ -2108,23 +2120,23 @@ class ScubaFlowScene extends Phaser.Scene {
 
                 let cx = slot * SLOT_SIZE + this._seededRnd(seed + 1) * SLOT_SIZE * 0.9 - SLOT_SIZE * 0.45;
                 let { floorY } = getWallY(cx);
-                
+
                 // Vertical depth into floor rock: 12px to 160px
                 let depth = 12 + this._seededRnd(seed + 2) * 148;
                 let cy = floorY + depth;
 
                 let w = 8 + this._seededRnd(seed + 3) * 82; // 8px to 90px wide
                 let h = 4 + this._seededRnd(seed + 4) * 36; // 4px to 40px vertical displacement (irregularity)
-                
+
                 let segments = Math.floor(3 + this._seededRnd(seed + 5) * 4); // 3 to 6 segments
                 let branchAt = this._seededRnd(seed + 6) > 0.5 ? Math.floor(1 + this._seededRnd(seed + 7) * (segments - 2)) : -1;
-                
+
                 let thickness = 0.6 + this._seededRnd(seed + 8) * 1.6; // some hairline, some thick
                 let alphaScale = 0.15 + this._seededRnd(seed + 9) * 0.4;
                 g.lineStyle(thickness, floorColor, (alphaScale + flowFill * 0.22));
 
                 g.beginPath();
-                let prevX = cx - w/2;
+                let prevX = cx - w / 2;
                 let prevY = cy;
                 g.moveTo(prevX, prevY);
 
@@ -2133,15 +2145,15 @@ class ScubaFlowScene extends Phaser.Scene {
 
                 for (let step = 0; step < segments; step++) {
                     let progress = (step + 1) / segments;
-                    let targetSegX = cx - w/2 + progress * w;
+                    let targetSegX = cx - w / 2 + progress * w;
                     let targetSegY = cy + (this._seededRnd(seed + 10 + step) - 0.5) * h;
                     g.lineTo(targetSegX, targetSegY);
-                    
+
                     if (step === branchAt) {
                         branchStartX = targetSegX;
                         branchStartY = targetSegY;
                     }
-                    
+
                     prevX = targetSegX;
                     prevY = targetSegY;
                 }
@@ -2156,7 +2168,7 @@ class ScubaFlowScene extends Phaser.Scene {
                     g.lineStyle(thickness * 0.6, floorColor, (alphaScale + flowFill * 0.22) * 0.7);
                     g.beginPath();
                     g.moveTo(branchStartX, branchStartY);
-                    
+
                     let bSegments = Math.floor(2 + this._seededRnd(seed + 23) * 3);
                     for (let step = 0; step < bSegments; step++) {
                         let progress = (step + 1) / bSegments;
@@ -2177,23 +2189,23 @@ class ScubaFlowScene extends Phaser.Scene {
 
                 let cx = slot * SLOT_SIZE + this._seededRnd(seed + 1) * SLOT_SIZE * 0.9 - SLOT_SIZE * 0.45;
                 let { ceilY } = getWallY(cx);
-                
+
                 // Vertical depth into ceiling rock: 12px to 160px
                 let depth = 12 + this._seededRnd(seed + 2) * 148;
                 let cy = ceilY - depth;
 
                 let w = 8 + this._seededRnd(seed + 3) * 82;
                 let h = 4 + this._seededRnd(seed + 4) * 36;
-                
+
                 let segments = Math.floor(3 + this._seededRnd(seed + 5) * 4);
                 let branchAt = this._seededRnd(seed + 6) > 0.5 ? Math.floor(1 + this._seededRnd(seed + 7) * (segments - 2)) : -1;
-                
+
                 let thickness = 0.6 + this._seededRnd(seed + 8) * 1.6;
                 let alphaScale = 0.15 + this._seededRnd(seed + 9) * 0.4;
                 g.lineStyle(thickness, ceilColor, (alphaScale + flowFill * 0.22));
 
                 g.beginPath();
-                let prevX = cx - w/2;
+                let prevX = cx - w / 2;
                 let prevY = cy;
                 g.moveTo(prevX, prevY);
 
@@ -2202,15 +2214,15 @@ class ScubaFlowScene extends Phaser.Scene {
 
                 for (let step = 0; step < segments; step++) {
                     let progress = (step + 1) / segments;
-                    let targetSegX = cx - w/2 + progress * w;
+                    let targetSegX = cx - w / 2 + progress * w;
                     let targetSegY = cy + (this._seededRnd(seed + 10 + step) - 0.5) * h;
                     g.lineTo(targetSegX, targetSegY);
-                    
+
                     if (step === branchAt) {
                         branchStartX = targetSegX;
                         branchStartY = targetSegY;
                     }
-                    
+
                     prevX = targetSegX;
                     prevY = targetSegY;
                 }
@@ -2225,7 +2237,7 @@ class ScubaFlowScene extends Phaser.Scene {
                     g.lineStyle(thickness * 0.6, ceilColor, (alphaScale + flowFill * 0.22) * 0.7);
                     g.beginPath();
                     g.moveTo(branchStartX, branchStartY);
-                    
+
                     let bSegments = Math.floor(2 + this._seededRnd(seed + 23) * 3);
                     for (let step = 0; step < bSegments; step++) {
                         let progress = (step + 1) / bSegments;
@@ -2279,7 +2291,7 @@ class ScubaFlowScene extends Phaser.Scene {
     }
 
     createMulberry32(seed) {
-        return function() {
+        return function () {
             let t = seed += 0x6D2B79F5;
             t = Math.imul(t ^ (t >>> 15), t | 1);
             t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
@@ -2292,14 +2304,14 @@ class ScubaFlowScene extends Phaser.Scene {
         const OPEN_CHANCE = 0.55; // probability a slot has an opening
         const WIN_EVERY = 5;  // every Nth opening is a "depth window"
 
-        let wallSat  = this.siltActive ? 0.15 : Math.min(1.0, flowSat + flowFill * 0.3);
-        let wallLum  = Math.min(0.75, 0.5 + flowFill * 0.15);
+        let wallSat = this.siltActive ? 0.15 : Math.min(1.0, flowSat + flowFill * 0.3);
+        let wallLum = Math.min(0.75, 0.5 + flowFill * 0.15);
 
         // Helper: get floor/ceil Y at an arbitrary worldX by interpolating the pre-built arrays
         const getWallY = (wx) => {
             let t = (wx / this.baseScrollSpeed) * 1000;
-            let targetY  = this.getTargetYAtTime(t);
-            let energy   = this.getEnergyAtTime(t);
+            let targetY = this.getTargetYAtTime(t);
+            let energy = this.getEnergyAtTime(t);
             let { floorOffset, ceilOffset } = this.getWallOffsets(wx, energy);
             let floorY = targetY + floorOffset;
             let ceilY = targetY - ceilOffset;
@@ -2307,15 +2319,15 @@ class ScubaFlowScene extends Phaser.Scene {
         };
 
         // Far-parallax background colour used for depth-window fill
-        let farHue    = (this.baseHue + 200) % 360;
-        let farAlpha  = Math.min(0.55, 0.18 + (this.scoreMultiplier - 1) * 0.053) * 0.45;
-        let farLum    = Math.max(0.05, (this.siltActive ? 0.15 : Math.min(0.55, 0.25 + (this.scoreMultiplier - 1) * 0.043)) - 0.12);
-        let farColor  = Phaser.Display.Color.HSLToColor(farHue / 360,
-                            (this.siltActive ? 0.05 : Math.min(0.85, 0.25 + (this.scoreMultiplier - 1) * 0.086)) * 0.8,
-                            farLum).color;
+        let farHue = (this.baseHue + 200) % 360;
+        let farAlpha = Math.min(0.55, 0.18 + (this.scoreMultiplier - 1) * 0.053) * 0.45;
+        let farLum = Math.max(0.05, (this.siltActive ? 0.15 : Math.min(0.55, 0.25 + (this.scoreMultiplier - 1) * 0.043)) - 0.12);
+        let farColor = Phaser.Display.Color.HSLToColor(farHue / 360,
+            (this.siltActive ? 0.05 : Math.min(0.85, 0.25 + (this.scoreMultiplier - 1) * 0.086)) * 0.8,
+            farLum).color;
 
         let firstSlot = Math.floor(startX / SLOT_SIZE);
-        let lastSlot  = Math.ceil(endX  / SLOT_SIZE);
+        let lastSlot = Math.ceil(endX / SLOT_SIZE);
         let openingIdx = 0; // count openings to determine window slots
 
         for (let slot = firstSlot; slot <= lastSlot; slot++) {
@@ -2335,26 +2347,26 @@ class ScubaFlowScene extends Phaser.Scene {
             let { floorY, ceilY } = getWallY(cx);
 
             // Rock color for this opening's rim
-            let rimHue   = onFloor
+            let rimHue = onFloor
                 ? ((Phaser.Display.Color.IntegerToColor(floorColor).h * 360 + this.baseHue * 0.5) % 360)
-                : ((Phaser.Display.Color.IntegerToColor(ceilColor).h  * 360 + this.baseHue * 0.5) % 360);
+                : ((Phaser.Display.Color.IntegerToColor(ceilColor).h * 360 + this.baseHue * 0.5) % 360);
             let rimColor = Phaser.Display.Color.HSLToColor(rimHue / 360, wallSat, wallLum).color;
 
             if (onFloor) {
                 // Crack / side-tunnel opening IN the floor wall
                 // Shape: an irregular arch-like notch cut into the floor surface
-                let baseY   = floorY;       // surface of floor at cx
-                let leftX   = cx - ow / 2;
-                let rightX  = cx + ow / 2;
-                let deepY   = baseY + od;   // bottom of the pocket (into rock)
+                let baseY = floorY;       // surface of floor at cx
+                let leftX = cx - ow / 2;
+                let rightX = cx + ow / 2;
+                let deepY = baseY + od;   // bottom of the pocket (into rock)
 
                 // Jagged interior polygon with 5 control points for crack feel
                 let r1 = this._seededRnd(slot * 67 + 2);
                 let r2 = this._seededRnd(slot * 71 + 4);
                 let r3 = this._seededRnd(slot * 79 + 6);
-                let midX1  = leftX  + ow * (0.25 + r1 * 0.15);
-                let midX2  = leftX  + ow * (0.6  + r2 * 0.15);
-                let peakY  = baseY  + od * (0.45 + r3 * 0.35);
+                let midX1 = leftX + ow * (0.25 + r1 * 0.15);
+                let midX2 = leftX + ow * (0.6 + r2 * 0.15);
+                let peakY = baseY + od * (0.45 + r3 * 0.35);
 
                 // Window: fill with far parallax depth colour
                 if (isWindow) {
@@ -2362,7 +2374,7 @@ class ScubaFlowScene extends Phaser.Scene {
                     g.beginPath();
                     g.moveTo(leftX, baseY);
                     g.lineTo(midX1, peakY);
-                    g.lineTo(cx,    deepY);
+                    g.lineTo(cx, deepY);
                     g.lineTo(midX2, peakY);
                     g.lineTo(rightX, baseY);
                     g.closePath();
@@ -2374,7 +2386,7 @@ class ScubaFlowScene extends Phaser.Scene {
                 g.beginPath();
                 g.moveTo(leftX, baseY);
                 g.lineTo(midX1, peakY);
-                g.lineTo(cx,    deepY);
+                g.lineTo(cx, deepY);
                 g.lineTo(midX2, peakY);
                 g.lineTo(rightX, baseY);
                 g.closePath();
@@ -2385,31 +2397,31 @@ class ScubaFlowScene extends Phaser.Scene {
                 g.beginPath();
                 g.moveTo(leftX, baseY);
                 g.lineTo(midX1, peakY);
-                g.lineTo(cx,    deepY);
+                g.lineTo(cx, deepY);
                 g.lineTo(midX2, peakY);
                 g.lineTo(rightX, baseY);
                 g.strokePath();
 
             } else {
                 // Crack / side-tunnel opening IN the ceiling wall
-                let baseY   = ceilY;        // surface of ceiling at cx
-                let leftX   = cx - ow / 2;
-                let rightX  = cx + ow / 2;
-                let deepY   = baseY - od;   // top of the pocket (into rock above)
+                let baseY = ceilY;        // surface of ceiling at cx
+                let leftX = cx - ow / 2;
+                let rightX = cx + ow / 2;
+                let deepY = baseY - od;   // top of the pocket (into rock above)
 
                 let r1 = this._seededRnd(slot * 83 + 9);
                 let r2 = this._seededRnd(slot * 89 + 11);
                 let r3 = this._seededRnd(slot * 97 + 13);
-                let midX1  = leftX  + ow * (0.22 + r1 * 0.15);
-                let midX2  = leftX  + ow * (0.58 + r2 * 0.15);
-                let peakY  = baseY  - od * (0.40 + r3 * 0.35);
+                let midX1 = leftX + ow * (0.22 + r1 * 0.15);
+                let midX2 = leftX + ow * (0.58 + r2 * 0.15);
+                let peakY = baseY - od * (0.40 + r3 * 0.35);
 
                 if (isWindow) {
                     g.fillStyle(farColor, 0.55 + farAlpha);
                     g.beginPath();
                     g.moveTo(leftX, baseY);
                     g.lineTo(midX1, peakY);
-                    g.lineTo(cx,    deepY);
+                    g.lineTo(cx, deepY);
                     g.lineTo(midX2, peakY);
                     g.lineTo(rightX, baseY);
                     g.closePath();
@@ -2420,7 +2432,7 @@ class ScubaFlowScene extends Phaser.Scene {
                 g.beginPath();
                 g.moveTo(leftX, baseY);
                 g.lineTo(midX1, peakY);
-                g.lineTo(cx,    deepY);
+                g.lineTo(cx, deepY);
                 g.lineTo(midX2, peakY);
                 g.lineTo(rightX, baseY);
                 g.closePath();
@@ -2430,7 +2442,7 @@ class ScubaFlowScene extends Phaser.Scene {
                 g.beginPath();
                 g.moveTo(leftX, baseY);
                 g.lineTo(midX1, peakY);
-                g.lineTo(cx,    deepY);
+                g.lineTo(cx, deepY);
                 g.lineTo(midX2, peakY);
                 g.lineTo(rightX, baseY);
                 g.strokePath();
@@ -2442,7 +2454,7 @@ class ScubaFlowScene extends Phaser.Scene {
         this.collectiblesGroup = this.add.group();
 
         for (let col of this.levelData.collectibles) {
-            let colX = (col.time / 1000) * this.baseScrollSpeed;
+            let colX = 250 + (col.time / 1000) * this.baseScrollSpeed;
             let debris = this.add.sprite(colX, col.y, 'collectible');
             debris.setOrigin(0.5);
 
@@ -2471,17 +2483,17 @@ class ScubaFlowScene extends Phaser.Scene {
         let collectPts = [{ x: 0, y: 0, r: 6.5 }]; // fallback for non-diver
         if (this.avatarType === 'diver') {
             let frogPhase = (this.elapsedTime / 350) % (Math.PI * 2);
-            let ke  = Math.max(0, Math.sin(frogPhase));
+            let ke = Math.max(0, Math.sin(frogPhase));
             let ke2 = Math.max(0, Math.sin(frogPhase + 0.25));
-            let f2x = -8  - (6 + ke  * 8) - (2 + ke  * 12);
-            let f2y = -6  - (12 - ke  * 8) - (10 - ke  * 10);
+            let f2x = -8 - (6 + ke * 8) - (2 + ke * 12);
+            let f2y = -6 - (12 - ke * 8) - (10 - ke * 10);
             let f1x = -10 - (6 + ke2 * 8) - (2 + ke2 * 12);
-            let f1y =  2  - (12 - ke2 * 8) - (10 - ke2 * 10);
+            let f1y = 2 - (12 - ke2 * 8) - (10 - ke2 * 10);
             collectPts = [
-                { x: 0,   y: 0,   r: 6.5 },  // torso
-                { x: 14,  y: -4,  r: 4 },    // head
+                { x: 0, y: 0, r: 6.5 },  // torso
+                { x: 14, y: -4, r: 4 },    // head
                 { x: -10, y: -13, r: 2 },    // tank
-                { x: 26,  y: -2,  r: 3 },    // hand
+                { x: 26, y: -2, r: 3 },    // hand
                 { x: f1x, y: f1y, r: 4 },    // foot 1 + fin
                 { x: f2x, y: f2y, r: 4 },    // foot 2 + fin
             ];
@@ -2602,7 +2614,7 @@ class ScubaFlowScene extends Phaser.Scene {
         // Dynamically scale silt-out duration based on impact speed (absolute vy)
         let impactSpeed = Math.abs(impactVy);
         let scale = Phaser.Math.Clamp(impactSpeed / 70, 0.44, 1.33); // range: ~0.8s to ~2.4s
-        
+
         // Scale duration inversely with level scroll speed to keep blind travel distance consistent
         let speedFactor = 50 / this.baseScrollSpeed;
         let currentDuration = this.siltDuration * scale * speedFactor;
@@ -2726,8 +2738,8 @@ class ScubaFlowScene extends Phaser.Scene {
         let slope = (y2 - y1) / 10;
 
         // Compute minimum half-height clearance needed for player's horizontal bounding box
-        // Negative slopes (climbing) require significantly more vertical clearance.
-        let slopeClearance = 28.5 + (slope < 0 ? -29.0 * slope : 15.0 * slope);
+        // Sinking/descending is harder to react to, so downward slopes get symmetric/sufficient clearance.
+        let slopeClearance = 28.5 + (slope < 0 ? -29.0 * slope : 32.0 * slope);
 
         // Ensure baseOffset expands to allow clearance plus some margin
         let baseOffset = Math.max(78 - localEnergy * 22, slopeClearance + 5); // 56–78px minimum base
@@ -2750,9 +2762,9 @@ class ScubaFlowScene extends Phaser.Scene {
         // Guarantee 100% collectability without wall collisions:
         // Max downward offset is 40px (+8px player torso + 16px safety margin = 64px min floor offset)
         // Max upward offset is 28px (+16px player top + 16px safety margin = 60px min ceiling offset)
-        return { 
-            floorOffset: Math.max(64, floorOffset), 
-            ceilOffset: Math.max(60, ceilOffset) 
+        return {
+            floorOffset: Math.max(64, floorOffset),
+            ceilOffset: Math.max(60, ceilOffset)
         };
     }
 
@@ -2800,7 +2812,7 @@ class ScubaFlowScene extends Phaser.Scene {
         this.musicSource.onended = () => {
             console.log("musicSource onended fired");
             this.musicCompleted = true;
-            if (this.player.x >= this.targetEndX && !this.isFadingOut && !this.isLevelCompleted) {
+            if (!this.isFadingOut && !this.isLevelCompleted) {
                 this.startFadeout();
             }
         };
@@ -3041,7 +3053,7 @@ class ScubaFlowScene extends Phaser.Scene {
             card.appendChild(styleSheet);
         }
 
-        let titleStyle = isPerfect 
+        let titleStyle = isPerfect
             ? 'background: linear-gradient(135deg, #00f0ff 0%, #ff00e4 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-size: 3.6rem; font-weight: 800; margin-bottom: 20px; letter-spacing: 3px; filter: drop-shadow(0 0 10px rgba(0, 240, 255, 0.6));'
             : 'background: linear-gradient(135deg, #00f0ff 0%, #bd00ff 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-size: 3rem; font-weight: 700; margin-bottom: 20px; letter-spacing: 2px;';
 
@@ -3201,7 +3213,7 @@ class ScubaFlowScene extends Phaser.Scene {
 
         let path = [];
         // Scale slope difficulty based on scroll speed to guarantee climbs/descents are physically navigateable
-        let maxDeltaY = 40.0; 
+        let maxDeltaY = 40.0;
         if (this.baseScrollSpeed === 45) {
             maxDeltaY = 30.0; // gentle but still dynamic and fun slopes on calm tracks
         }
@@ -3237,8 +3249,8 @@ class ScubaFlowScene extends Phaser.Scene {
                 targetY = prevY + Math.sign(dy) * maxDeltaY;
             }
 
-            if (timeMs < 4000) {
-                let tRatio = timeMs / 4000;
+            if (timeMs < 3000) {
+                let tRatio = timeMs / 3000;
                 targetY = 250 + (targetY - 250) * tRatio;
             } else if (timeMs > levelLengthMs - 2000) {
                 let tRatio = (levelLengthMs - timeMs) / 2000;
@@ -3257,11 +3269,11 @@ class ScubaFlowScene extends Phaser.Scene {
         this.clusterCollected = {};
 
         let forceSpawnThreshold = spacerTime * 1.2;
-        let numCollectibleChunks = Math.floor(levelLengthMs / (windowSec * 1000));
+        let numCollectibleChunks = Math.floor(songLengthMs / (windowSec * 1000));
         for (let i = 1; i < numCollectibleChunks - 1; i++) {
             let timeMs = i * windowSec * 1000;
 
-            if (timeMs < 4000 || timeMs > levelLengthMs - 1200) continue;
+            if (timeMs < 3000 || timeMs > songLengthMs - 1200) continue;
 
             let energyVal, prevEnergyVal, nextEnergyVal, smoothedEnergyVal;
             if (i < rawEnergy.length) {
@@ -3369,7 +3381,7 @@ class ScubaFlowScene extends Phaser.Scene {
             zones: zones,
             beats: beats
         };
-        this.totalCollectibles = collectibles.filter(c => c.time <= songLengthMs).length;
+        this.totalCollectibles = collectibles.length;
         this.flowMilestoneInterval = Math.max(6000, Math.min(15000, songLengthMs / 15));
         this.maxPotentialPoints = this.calculateMaxPotentialPoints();
         this.targetEndX = (songLengthMs / 1000) * this.baseScrollSpeed + 250;
@@ -3401,14 +3413,9 @@ class ScubaFlowScene extends Phaser.Scene {
 
         // 2. Collectible collection events
         for (let col of sortedCollectibles) {
-            if (col.time > this.levelData.songLengthMs) continue;
-            // Player starts at x=250.
-            // Collectible at col.time is at colX = (col.time / 1000) * baseScrollSpeed.
-            // Player reaches it at tReach = col.time - (250 / baseScrollSpeed) * 1000.
-            let tReach = col.time - (250 / this.baseScrollSpeed) * 1000;
             events.push({
                 type: 'collectible',
-                time: tReach,
+                time: col.time,
                 clusterId: col.clusterId
             });
         }
@@ -3515,10 +3522,10 @@ class ScubaFlowScene extends Phaser.Scene {
 
         // Verify collectibles generated on silent track
         console.assert(this.levelData.collectibles.length > 0, `Assertion Failed: Silent tracks must still generate collectibles to avoid empty tunnels`);
-        
-        // Check maximum gap between collectibles in the playable region (4s to duration - 1.2s)
+
+        // Check maximum gap between collectibles in the playable region (3s to duration - 1.2s)
         let sortedCols = [...this.levelData.collectibles].sort((a, b) => a.time - b.time);
-        let lastTime = 4000;
+        let lastTime = 3000;
         for (let col of sortedCols) {
             let gap = col.time - lastTime;
             console.assert(gap <= 6800, `Assertion Failed: Large gap between collectibles detected: ${gap}ms`);
@@ -3528,11 +3535,11 @@ class ScubaFlowScene extends Phaser.Scene {
         // Test 8: Deterministic generation and hashing
         // First generation (saved in this.levelData after generateProceduralLevel(mockAudio))
         let run1Collectibles = [...this.levelData.collectibles];
-        
+
         // Second generation with the exact same mockAudio
         this.generateProceduralLevel(mockAudio);
         let run2Collectibles = [...this.levelData.collectibles];
-        
+
         console.assert(run1Collectibles.length === run2Collectibles.length, "Assertion Failed: Determinism check - collectible counts differ");
         for (let i = 0; i < run1Collectibles.length; i++) {
             console.assert(run1Collectibles[i].time === run2Collectibles[i].time, `Assertion Failed: Determinism check - collectible time mismatch at index ${i}`);
@@ -3552,13 +3559,13 @@ class ScubaFlowScene extends Phaser.Scene {
         };
         this.generateProceduralLevel(mockAudio2);
         let run3Collectibles = [...this.levelData.collectibles];
-        
+
         // Assert that different audio data produces different level layouts
         let isIdentical = (run1Collectibles.length === run3Collectibles.length);
         if (isIdentical) {
             for (let i = 0; i < run1Collectibles.length; i++) {
-                if (run1Collectibles[i].time !== run3Collectibles[i].time || 
-                    run1Collectibles[i].y !== run3Collectibles[i].y || 
+                if (run1Collectibles[i].time !== run3Collectibles[i].time ||
+                    run1Collectibles[i].y !== run3Collectibles[i].y ||
                     run1Collectibles[i].clusterId !== run3Collectibles[i].clusterId) {
                     isIdentical = false;
                     break;
@@ -3566,32 +3573,32 @@ class ScubaFlowScene extends Phaser.Scene {
             }
         }
         console.assert(!isIdentical, "Assertion Failed: Hashing check - different audio data did not produce a different layout");
- 
+
         // Test 9: Web Audio API time-step and jitter calculation
         let simElapsed = 0;
         let simPrevElapsed = 0;
         let mockAudioCtxTime = 0.0;
         let mockMusicStartTime = 0.0;
-        
+
         // Frame 1
         simPrevElapsed = simElapsed;
         simElapsed = (mockAudioCtxTime - mockMusicStartTime) * 1000;
         let dt1 = (simElapsed - simPrevElapsed) / 1000;
         if (dt1 < 0) dt1 = 0;
-        
+
         // Frame 2 (Jitter: Audio clock does not advance)
         simPrevElapsed = simElapsed;
         simElapsed = (mockAudioCtxTime - mockMusicStartTime) * 1000;
         let dt2 = (simElapsed - simPrevElapsed) / 1000;
         if (dt2 < 0) dt2 = 0;
-        
+
         // Frame 3 (Audio clock advances to 33.3ms)
         mockAudioCtxTime = 0.0333;
         simPrevElapsed = simElapsed;
         simElapsed = (mockAudioCtxTime - mockMusicStartTime) * 1000;
         let dt3 = (simElapsed - simPrevElapsed) / 1000;
         if (dt3 < 0) dt3 = 0;
-        
+
         let totalDt = dt1 + dt2 + dt3;
         console.assert(Math.abs(totalDt - 0.0333) < 0.0001, `Assertion Failed: Expect total dt to be 0.0333, got ${totalDt}`);
 
