@@ -14,6 +14,8 @@ class ScubaFlowScene extends Phaser.Scene {
         this.baseScrollSpeed = 40;
         this.useAutopilot = window.useAutopilot || false;
         this.simulatedSpaceDown = false;
+        this.countdownActive = false;
+        this.countdownText = null;
 
         // Simplified Agile Buoyancy Physics
         this.V_lung = 0.5; // target state [0 = full sink, 1 = full rise]
@@ -36,6 +38,7 @@ class ScubaFlowScene extends Phaser.Scene {
         this.siltTime = 0;
         this.siltDuration = 1800; // 1.8 seconds recovery distortion — shorter for playability
         this.siltSource = 'floor';
+        this.currentSiltDuration = 1800;
 
         // Buddy State Machine
         this.buddyState = 'normal'; // 'normal', 'assisting', 'relieved'
@@ -60,6 +63,8 @@ class ScubaFlowScene extends Phaser.Scene {
         this.clusterCollected = {};
         this.isFadingOut = false;
         this.isLevelCompleted = false;
+        this.musicCompleted = false;
+        this.targetEndX = 0;
     }
 
     preload() {
@@ -71,6 +76,7 @@ class ScubaFlowScene extends Phaser.Scene {
         this.levelData = {
             bpm: 60,
             levelLengthMs: 120000,
+            songLengthMs: 120000,
             path: [
                 { time: 0, y: 200, energy: 0.2 },
                 { time: 30000, y: 450, energy: 0.5 },
@@ -85,6 +91,7 @@ class ScubaFlowScene extends Phaser.Scene {
         this.totalCollectibles = 0;
         this.lastProcessedBeatIdx = -1;
         this.beatRipples = [];
+        this.targetEndX = (this.levelData.songLengthMs / 1000) * this.baseScrollSpeed + 250;
 
         // Retrieve avatar selection from global scope
         this.avatarType = window.selectedAvatar || 'diver';
@@ -228,18 +235,14 @@ class ScubaFlowScene extends Phaser.Scene {
                             this.cameras.main.startFollow(this.player, true, 0.1, 1, -250, 0);
                             console.log("Camera follow configured.");
 
-                            console.log("Starting setupAudioEngine...");
-                            this.setupAudioEngine(ctx);
-                            console.log("setupAudioEngine completed.");
-
-                            this.isPlaying = true;
-                            console.log("Gameplay isPlaying set to true.");
-
                             // ONLY destroy text overlay if everything succeeded!
                             statusText.destroy();
                             subText.destroy();
                             statusBg.destroy();
                             console.log("Loading status overlay elements destroyed.");
+
+                            // Start countdown before beginning gameplay and music
+                            this.startCountdown(ctx);
                         } catch (innerErr) {
                             console.error("Error in decode success callback:", innerErr);
                             statusText.setText('Initialization Error');
@@ -276,9 +279,113 @@ class ScubaFlowScene extends Phaser.Scene {
         }
     }
 
+    startCountdown(ctx) {
+        this.countdownActive = true;
+        this.elapsedTime = 0;
+        this.isPlaying = true; // allow update loop to render the starting scene
+
+        let countdownNumbers = ['3', '2', '1', 'FLOW!'];
+        let colors = ['#bd00ff', '#00f0ff', '#ff007f', '#00ff66'];
+        let index = 0;
+
+        let showNext = () => {
+            if (index < countdownNumbers.length) {
+                let numStr = countdownNumbers[index];
+                let colorHex = colors[index];
+                this.countdownText.setText(numStr);
+                this.countdownText.setColor(colorHex);
+                this.countdownText.setShadow(0, 0, colorHex, 30, true, true);
+                this.countdownText.setStroke(colorHex, 8);
+                this.countdownText.setScale(0.3);
+                this.countdownText.setAlpha(1);
+
+                // Play tick beep using Web Audio API AudioContext directly
+                try {
+                    let osc = ctx.createOscillator();
+                    let gainNode = ctx.createGain();
+                    osc.connect(gainNode);
+                    gainNode.connect(ctx.destination);
+                    osc.type = 'sine';
+                    if (numStr === 'FLOW!') {
+                        osc.frequency.setValueAtTime(440, ctx.currentTime);
+                        osc.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 0.25);
+                        gainNode.gain.setValueAtTime(0.15, ctx.currentTime);
+                        gainNode.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.4);
+                        osc.start();
+                        osc.stop(ctx.currentTime + 0.5);
+                    } else {
+                        osc.frequency.setValueAtTime(523.25, ctx.currentTime); // C5 note
+                        gainNode.gain.setValueAtTime(0.1, ctx.currentTime);
+                        gainNode.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.15);
+                        osc.start();
+                        osc.stop(ctx.currentTime + 0.2);
+                    }
+                } catch (e) {
+                    console.warn("Failed to play countdown beep:", e);
+                }
+
+                this.tweens.add({
+                    targets: this.countdownText,
+                    scale: 1.5,
+                    alpha: { from: 1, to: 0 },
+                    duration: 1000,
+                    ease: 'Cubic.easeOut',
+                    onComplete: () => {
+                        index++;
+                        showNext();
+                    }
+                });
+            } else {
+                this.countdownText.destroy();
+                this.countdownActive = false;
+                console.log("Countdown complete. Starting setupAudioEngine...");
+                this.setupAudioEngine(ctx);
+                console.log("setupAudioEngine completed.");
+            }
+        };
+
+        this.countdownText = this.add.text(600, 350, '', {
+            fontFamily: 'Outfit',
+            fontSize: '140px',
+            fontStyle: 'bold'
+        }).setOrigin(0.5).setDepth(100);
+
+        showNext();
+    }
+
     update(time, delta) {
         try {
             if (!this.isPlaying) return;
+
+            if (this.countdownActive) {
+                this.elapsedTime = 0;
+                this.player.x = 250;
+                this.buddy.x = 550;
+
+                let buddyStartY = this.getTargetYAtTime((550 / this.baseScrollSpeed) * 1000);
+                this.buddy.y = buddyStartY;
+
+                let playerStartY = this.getTargetYAtTime((250 / this.baseScrollSpeed) * 1000);
+                this.player.y = playerStartY;
+
+                // Simulate normal breathing cycle for player visuals during countdown
+                let breathPeriod = 3600;
+                let breathPhase = (time % breathPeriod) / breathPeriod;
+                this.V_lung = 0.5 + 0.3 * Math.sin(breathPhase * Math.PI * 2);
+
+                this.emitBreathingParticles();
+
+                // Redraw visualizers and terrain so everything is visible
+                this.drawParallax(time);
+                this.drawBackgroundVisuals(time);
+                this.drawTerrain();
+                this.drawCaveLights();
+                this.drawPlayerVisuals(time);
+                this.drawBuddyVisuals(time);
+                this.drawForegroundBubbles(delta / 1000);
+                this.drawSiltOverlay();
+                return;
+            }
 
             let prevElapsedTime = this.elapsedTime;
             if (this.musicStartTime !== null && this.audioContext) {
@@ -287,15 +394,13 @@ class ScubaFlowScene extends Phaser.Scene {
                 this.elapsedTime += delta;
             }
             let dt = (this.elapsedTime - prevElapsedTime) / 1000;
-            if (dt <= 0) dt = delta / 1000; // fallback to prevent division by zero/negative steps
+            if (dt < 0) dt = 0; // Prevent negative time steps due to clock jitter
             let deltaMs = dt * 1000;
             let physDt = Math.min(dt, 0.15); // cap physics step to prevent physics engine explosions
 
-            // Ensure we stop when music/level completes
-            if (this.elapsedTime >= this.levelData.levelLengthMs) {
-                if (!this.isFadingOut) {
-                    this.startFadeout();
-                }
+            // Start fadeout when player reaches targetEndX, track completes, or time runs out
+            if ((this.player.x >= this.targetEndX || this.musicCompleted || this.elapsedTime >= this.levelData.songLengthMs) && !this.isFadingOut) {
+                this.startFadeout();
             }
 
 
@@ -317,12 +422,12 @@ class ScubaFlowScene extends Phaser.Scene {
                 let foot1Y = 2 - (12 - kickExtension2 * 8) - (10 - kickExtension2 * 10);
 
                 checkPoints = [
-                    { x: 0,   y: 0,       r: 8,  floor: true,  ceil: true  }, // Torso center (chest ellipse half-h=8)
-                    { x: 14,  y: -4,      r: 5,  floor: true,  ceil: true  }, // Head
-                    { x: -10, y: -13,     r: 3,  floor: false, ceil: true  }, // Tank tops (highest solid point)
-                    { x: 26,  y: -2,      r: 4,  floor: true,  ceil: true  }, // Light hand (forward-most)
-                    { x: foot1X, y: foot1Y, r: 5, floor: true, ceil: true }, // Foot 1 — floor & ceiling
-                    { x: foot2X, y: foot2Y, r: 5, floor: true, ceil: true }, // Foot 2 — floor & ceiling
+                    { x: 0, y: 0, r: 6.5, floor: true, ceil: true }, // Torso center
+                    { x: 14, y: -4, r: 4, floor: true, ceil: true }, // Head
+                    { x: -10, y: -13, r: 2, floor: false, ceil: true }, // Tank tops (highest solid point)
+                    { x: 26, y: -2, r: 3, floor: true, ceil: true }, // Light hand (forward-most)
+                    { x: foot1X, y: foot1Y, r: 4, floor: true, ceil: true }, // Foot 1 — floor & ceiling
+                    { x: foot2X, y: foot2Y, r: 4, floor: true, ceil: true }, // Foot 2 — floor & ceiling
                 ];
             } else {
                 checkPoints = [
@@ -373,9 +478,11 @@ class ScubaFlowScene extends Phaser.Scene {
                 // Glide player smoothly towards the target path (completely organic visualizer glide)
                 let lastY = this.player.y;
                 this.player.y = Phaser.Math.Linear(this.player.y, targetY, 1 - Math.exp(-6 * physDt));
-                
+
                 // Calculate simulated velocity
-                this.vy = (this.player.y - lastY) / physDt;
+                if (physDt > 0) {
+                    this.vy = (this.player.y - lastY) / physDt;
+                }
             }
 
             // Standard input & lung volume simulation (shared between manual & autopilot)
@@ -435,8 +542,8 @@ class ScubaFlowScene extends Phaser.Scene {
             // 3. Simplified Buoyancy Physics
             let lastY = this.player.y;
             if (!this.useAutopilot) {
-                this.buoyancySmooth += (this.V_lung - this.buoyancySmooth) * physDt * 4.5;
-                let ay = (this.buoyancySmooth - 0.5) * -600; // Damped to ±300 px/s² for fine steering
+                this.buoyancySmooth += (this.V_lung - this.buoyancySmooth) * physDt * 4.8;
+                let ay = (this.buoyancySmooth - 0.5) * -640; // Retuned for balanced, swifter steering with less oversteer
 
                 this.vy += ay * physDt;
                 this.vy *= Math.exp(-this.dragCoeff * physDt);
@@ -474,7 +581,9 @@ class ScubaFlowScene extends Phaser.Scene {
                 }
 
                 // Update vy post-clamp for visual/audio effects
-                this.vy = (this.player.y - lastY) / physDt;
+                if (physDt > 0) {
+                    this.vy = (this.player.y - lastY) / physDt;
+                }
             }
 
             // 4. Cave Boundaries & Local Energy Calculation
@@ -494,7 +603,8 @@ class ScubaFlowScene extends Phaser.Scene {
             let collisionTriggered = false;
             let collisionSource = 'floor';
 
-            // Decay grace period
+            // Capture pre-collision vertical velocity to determine impact strength
+            let impactVy = this.vy;
 
             for (let pt of checkPoints) {
                 let wx = px + pt.x;
@@ -526,7 +636,7 @@ class ScubaFlowScene extends Phaser.Scene {
                 let pathCenterY = this.getTargetYAtTime(timeAtPlayer);
                 let pushDir = Math.sign(pathCenterY - this.player.y);
                 this.vy += pushDir * 60;
-                this.triggerPsychedelicSilt(collisionSource);
+                this.triggerPsychedelicSilt(collisionSource, impactVy);
             }
 
             // Continuous silt particle emission when dragging (big sediment clouds, not overwhelming)
@@ -732,7 +842,7 @@ class ScubaFlowScene extends Phaser.Scene {
             this.drawCaveLights();
             this.drawPlayerVisuals(time);
             this.drawBuddyVisuals(time);
-            this.drawForegroundBubbles(dt);
+            this.drawForegroundBubbles(delta / 1000);
             this.drawSiltOverlay();
 
             // 11. Check Collectibles steering
@@ -866,7 +976,15 @@ class ScubaFlowScene extends Phaser.Scene {
         let dt = this.game.loop.delta / 1000;
 
         // 1. Exhale bubbles on spacebar release (lung volume shrinking)
-        let spaceDown = this.useAutopilot ? this.simulatedSpaceDown : this.spaceKey.isDown;
+        let spaceDown;
+        if (this.countdownActive) {
+            let breathPeriod = 3600;
+            let breathPhase = (this.time.now % breathPeriod) / breathPeriod;
+            spaceDown = (breathPhase < 0.5);
+        } else {
+            spaceDown = this.useAutopilot ? this.simulatedSpaceDown : this.spaceKey.isDown;
+        }
+
         if (!spaceDown && this.V_lung > 0.05) {
             if (Math.random() < 0.20) {
                 let rndHue = (this.baseHue + Math.random() * 60) % 360;
@@ -1034,7 +1152,7 @@ class ScubaFlowScene extends Phaser.Scene {
         {
             let nStep = 80;
             let nCount = Math.ceil(screenW / nStep) + 2;
-            let nBase  = Math.floor((camX * nearFactor) / nStep) * nStep;
+            let nBase = Math.floor((camX * nearFactor) / nStep) * nStep;
             // Ceiling band
             ng.beginPath();
             let nFirst = true;
@@ -1210,11 +1328,11 @@ class ScubaFlowScene extends Phaser.Scene {
                     let freq2 = 10 + a * 3;
                     let phase1 = angle * freq1 - (time * 0.005);
                     let phase2 = angle * freq2 + (time * 0.012);
-                    
+
                     let amp1 = 4 + pulse * 6;
                     let amp2 = 2 + pulse * 3;
                     let waveVal = Math.sin(phase1) * amp1 + (Math.abs(Math.sin(phase2)) - 0.5) * amp2 * 2;
-                    
+
                     // Modulate radius by localEnergy and flowState multiplier
                     let r = auraR + waveVal * (0.4 + this.localEnergy * 0.6);
                     let ax = Math.cos(angle) * r;
@@ -1260,22 +1378,22 @@ class ScubaFlowScene extends Phaser.Scene {
             // --- 2. DRAW DOUBLE TANKS (TWINSET - Cave diving standard horizontal trim) ---
             g.lineStyle(1.2, accentColor, 1);
             g.fillStyle(0x020514, 0.95);
-            
+
             // Tank 2 (upper cylinder in perspective)
             g.fillRoundedRect(-22, -16, 24, 6, 2);
             g.strokeRoundedRect(-22, -16, 24, 6, 2);
-            
+
             // Tank 1 (lower cylinder, closer to back)
             g.fillRoundedRect(-22, -11, 24, 6, 2);
             g.strokeRoundedRect(-22, -11, 24, 6, 2);
-            
+
             // Isolator Manifold connecting the two tanks at the valves (X = 2)
             g.lineStyle(1.5, accentColor, 1);
             g.beginPath();
             g.moveTo(2, -13);
             g.lineTo(2, -8);
             g.strokePath();
-            
+
             // Metal tank bands holding them together
             g.lineStyle(1.0, mainColor, 0.8);
             g.beginPath();
@@ -1563,20 +1681,20 @@ class ScubaFlowScene extends Phaser.Scene {
 
         // --- 2. DRAW DOUBLE TANKS (TWINSET - Wireframe style, horizontal trim) ---
         g.lineStyle(1.2, accentColor, 0.95);
-        
+
         // Tank 2 (upper cylinder in perspective)
         g.strokeRoundedRect(-22, -16, 24, 6, 2);
-        
+
         // Tank 1 (lower cylinder, closer to back)
         g.strokeRoundedRect(-22, -11, 24, 6, 2);
-        
+
         // Isolator Manifold connecting the two tanks at the valves
         g.lineStyle(1.5, accentColor, 0.95);
         g.beginPath();
         g.moveTo(2, -13);
         g.lineTo(2, -8);
         g.strokePath();
-        
+
         // Metal tank bands holding them together
         g.lineStyle(1.0, mainColor, 0.7);
         g.beginPath();
@@ -1899,7 +2017,7 @@ class ScubaFlowScene extends Phaser.Scene {
         let wallSat = this.siltActive ? 0.15 : Math.min(1.0, flowSat + flowFill * 0.3);
         let wallLum = Math.min(0.75, (0.5 + flowLightBoost) + flowFill * 0.15);
         let floorColor = Phaser.Display.Color.HSLToColor(floorHue / 360, wallSat, wallLum).color;
-        let ceilColor  = Phaser.Display.Color.HSLToColor(ceilHue  / 360, wallSat, wallLum).color;
+        let ceilColor = Phaser.Display.Color.HSLToColor(ceilHue / 360, wallSat, wallLum).color;
 
         let startX = this.cameras.main.scrollX - 100;
         let endX = startX + 1400;
@@ -1991,7 +2109,7 @@ class ScubaFlowScene extends Phaser.Scene {
         // --- Peppered Foreground Cracks on Player's Layer (Drawn in solid rock face with high variety) ---
         const SLOT_SIZE = 320;
         let firstSlot = Math.floor(startX / SLOT_SIZE);
-        let lastSlot  = Math.ceil(endX  / SLOT_SIZE);
+        let lastSlot = Math.ceil(endX / SLOT_SIZE);
         for (let slot = firstSlot; slot <= lastSlot; slot++) {
             // 1. Cracks on Floor rock face
             let numCracksF = Math.floor(1 + this._seededRnd(slot * 23 + 5) * 3); // 1, 2, or 3 cracks
@@ -2002,23 +2120,23 @@ class ScubaFlowScene extends Phaser.Scene {
 
                 let cx = slot * SLOT_SIZE + this._seededRnd(seed + 1) * SLOT_SIZE * 0.9 - SLOT_SIZE * 0.45;
                 let { floorY } = getWallY(cx);
-                
+
                 // Vertical depth into floor rock: 12px to 160px
                 let depth = 12 + this._seededRnd(seed + 2) * 148;
                 let cy = floorY + depth;
 
                 let w = 8 + this._seededRnd(seed + 3) * 82; // 8px to 90px wide
                 let h = 4 + this._seededRnd(seed + 4) * 36; // 4px to 40px vertical displacement (irregularity)
-                
+
                 let segments = Math.floor(3 + this._seededRnd(seed + 5) * 4); // 3 to 6 segments
                 let branchAt = this._seededRnd(seed + 6) > 0.5 ? Math.floor(1 + this._seededRnd(seed + 7) * (segments - 2)) : -1;
-                
+
                 let thickness = 0.6 + this._seededRnd(seed + 8) * 1.6; // some hairline, some thick
                 let alphaScale = 0.15 + this._seededRnd(seed + 9) * 0.4;
                 g.lineStyle(thickness, floorColor, (alphaScale + flowFill * 0.22));
 
                 g.beginPath();
-                let prevX = cx - w/2;
+                let prevX = cx - w / 2;
                 let prevY = cy;
                 g.moveTo(prevX, prevY);
 
@@ -2027,15 +2145,15 @@ class ScubaFlowScene extends Phaser.Scene {
 
                 for (let step = 0; step < segments; step++) {
                     let progress = (step + 1) / segments;
-                    let targetSegX = cx - w/2 + progress * w;
+                    let targetSegX = cx - w / 2 + progress * w;
                     let targetSegY = cy + (this._seededRnd(seed + 10 + step) - 0.5) * h;
                     g.lineTo(targetSegX, targetSegY);
-                    
+
                     if (step === branchAt) {
                         branchStartX = targetSegX;
                         branchStartY = targetSegY;
                     }
-                    
+
                     prevX = targetSegX;
                     prevY = targetSegY;
                 }
@@ -2050,7 +2168,7 @@ class ScubaFlowScene extends Phaser.Scene {
                     g.lineStyle(thickness * 0.6, floorColor, (alphaScale + flowFill * 0.22) * 0.7);
                     g.beginPath();
                     g.moveTo(branchStartX, branchStartY);
-                    
+
                     let bSegments = Math.floor(2 + this._seededRnd(seed + 23) * 3);
                     for (let step = 0; step < bSegments; step++) {
                         let progress = (step + 1) / bSegments;
@@ -2071,23 +2189,23 @@ class ScubaFlowScene extends Phaser.Scene {
 
                 let cx = slot * SLOT_SIZE + this._seededRnd(seed + 1) * SLOT_SIZE * 0.9 - SLOT_SIZE * 0.45;
                 let { ceilY } = getWallY(cx);
-                
+
                 // Vertical depth into ceiling rock: 12px to 160px
                 let depth = 12 + this._seededRnd(seed + 2) * 148;
                 let cy = ceilY - depth;
 
                 let w = 8 + this._seededRnd(seed + 3) * 82;
                 let h = 4 + this._seededRnd(seed + 4) * 36;
-                
+
                 let segments = Math.floor(3 + this._seededRnd(seed + 5) * 4);
                 let branchAt = this._seededRnd(seed + 6) > 0.5 ? Math.floor(1 + this._seededRnd(seed + 7) * (segments - 2)) : -1;
-                
+
                 let thickness = 0.6 + this._seededRnd(seed + 8) * 1.6;
                 let alphaScale = 0.15 + this._seededRnd(seed + 9) * 0.4;
                 g.lineStyle(thickness, ceilColor, (alphaScale + flowFill * 0.22));
 
                 g.beginPath();
-                let prevX = cx - w/2;
+                let prevX = cx - w / 2;
                 let prevY = cy;
                 g.moveTo(prevX, prevY);
 
@@ -2096,15 +2214,15 @@ class ScubaFlowScene extends Phaser.Scene {
 
                 for (let step = 0; step < segments; step++) {
                     let progress = (step + 1) / segments;
-                    let targetSegX = cx - w/2 + progress * w;
+                    let targetSegX = cx - w / 2 + progress * w;
                     let targetSegY = cy + (this._seededRnd(seed + 10 + step) - 0.5) * h;
                     g.lineTo(targetSegX, targetSegY);
-                    
+
                     if (step === branchAt) {
                         branchStartX = targetSegX;
                         branchStartY = targetSegY;
                     }
-                    
+
                     prevX = targetSegX;
                     prevY = targetSegY;
                 }
@@ -2119,7 +2237,7 @@ class ScubaFlowScene extends Phaser.Scene {
                     g.lineStyle(thickness * 0.6, ceilColor, (alphaScale + flowFill * 0.22) * 0.7);
                     g.beginPath();
                     g.moveTo(branchStartX, branchStartY);
-                    
+
                     let bSegments = Math.floor(2 + this._seededRnd(seed + 23) * 3);
                     for (let step = 0; step < bSegments; step++) {
                         let progress = (step + 1) / bSegments;
@@ -2173,7 +2291,7 @@ class ScubaFlowScene extends Phaser.Scene {
     }
 
     createMulberry32(seed) {
-        return function() {
+        return function () {
             let t = seed += 0x6D2B79F5;
             t = Math.imul(t ^ (t >>> 15), t | 1);
             t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
@@ -2186,14 +2304,14 @@ class ScubaFlowScene extends Phaser.Scene {
         const OPEN_CHANCE = 0.55; // probability a slot has an opening
         const WIN_EVERY = 5;  // every Nth opening is a "depth window"
 
-        let wallSat  = this.siltActive ? 0.15 : Math.min(1.0, flowSat + flowFill * 0.3);
-        let wallLum  = Math.min(0.75, 0.5 + flowFill * 0.15);
+        let wallSat = this.siltActive ? 0.15 : Math.min(1.0, flowSat + flowFill * 0.3);
+        let wallLum = Math.min(0.75, 0.5 + flowFill * 0.15);
 
         // Helper: get floor/ceil Y at an arbitrary worldX by interpolating the pre-built arrays
         const getWallY = (wx) => {
             let t = (wx / this.baseScrollSpeed) * 1000;
-            let targetY  = this.getTargetYAtTime(t);
-            let energy   = this.getEnergyAtTime(t);
+            let targetY = this.getTargetYAtTime(t);
+            let energy = this.getEnergyAtTime(t);
             let { floorOffset, ceilOffset } = this.getWallOffsets(wx, energy);
             let floorY = targetY + floorOffset;
             let ceilY = targetY - ceilOffset;
@@ -2201,15 +2319,15 @@ class ScubaFlowScene extends Phaser.Scene {
         };
 
         // Far-parallax background colour used for depth-window fill
-        let farHue    = (this.baseHue + 200) % 360;
-        let farAlpha  = Math.min(0.55, 0.18 + (this.scoreMultiplier - 1) * 0.053) * 0.45;
-        let farLum    = Math.max(0.05, (this.siltActive ? 0.15 : Math.min(0.55, 0.25 + (this.scoreMultiplier - 1) * 0.043)) - 0.12);
-        let farColor  = Phaser.Display.Color.HSLToColor(farHue / 360,
-                            (this.siltActive ? 0.05 : Math.min(0.85, 0.25 + (this.scoreMultiplier - 1) * 0.086)) * 0.8,
-                            farLum).color;
+        let farHue = (this.baseHue + 200) % 360;
+        let farAlpha = Math.min(0.55, 0.18 + (this.scoreMultiplier - 1) * 0.053) * 0.45;
+        let farLum = Math.max(0.05, (this.siltActive ? 0.15 : Math.min(0.55, 0.25 + (this.scoreMultiplier - 1) * 0.043)) - 0.12);
+        let farColor = Phaser.Display.Color.HSLToColor(farHue / 360,
+            (this.siltActive ? 0.05 : Math.min(0.85, 0.25 + (this.scoreMultiplier - 1) * 0.086)) * 0.8,
+            farLum).color;
 
         let firstSlot = Math.floor(startX / SLOT_SIZE);
-        let lastSlot  = Math.ceil(endX  / SLOT_SIZE);
+        let lastSlot = Math.ceil(endX / SLOT_SIZE);
         let openingIdx = 0; // count openings to determine window slots
 
         for (let slot = firstSlot; slot <= lastSlot; slot++) {
@@ -2229,26 +2347,26 @@ class ScubaFlowScene extends Phaser.Scene {
             let { floorY, ceilY } = getWallY(cx);
 
             // Rock color for this opening's rim
-            let rimHue   = onFloor
+            let rimHue = onFloor
                 ? ((Phaser.Display.Color.IntegerToColor(floorColor).h * 360 + this.baseHue * 0.5) % 360)
-                : ((Phaser.Display.Color.IntegerToColor(ceilColor).h  * 360 + this.baseHue * 0.5) % 360);
+                : ((Phaser.Display.Color.IntegerToColor(ceilColor).h * 360 + this.baseHue * 0.5) % 360);
             let rimColor = Phaser.Display.Color.HSLToColor(rimHue / 360, wallSat, wallLum).color;
 
             if (onFloor) {
                 // Crack / side-tunnel opening IN the floor wall
                 // Shape: an irregular arch-like notch cut into the floor surface
-                let baseY   = floorY;       // surface of floor at cx
-                let leftX   = cx - ow / 2;
-                let rightX  = cx + ow / 2;
-                let deepY   = baseY + od;   // bottom of the pocket (into rock)
+                let baseY = floorY;       // surface of floor at cx
+                let leftX = cx - ow / 2;
+                let rightX = cx + ow / 2;
+                let deepY = baseY + od;   // bottom of the pocket (into rock)
 
                 // Jagged interior polygon with 5 control points for crack feel
                 let r1 = this._seededRnd(slot * 67 + 2);
                 let r2 = this._seededRnd(slot * 71 + 4);
                 let r3 = this._seededRnd(slot * 79 + 6);
-                let midX1  = leftX  + ow * (0.25 + r1 * 0.15);
-                let midX2  = leftX  + ow * (0.6  + r2 * 0.15);
-                let peakY  = baseY  + od * (0.45 + r3 * 0.35);
+                let midX1 = leftX + ow * (0.25 + r1 * 0.15);
+                let midX2 = leftX + ow * (0.6 + r2 * 0.15);
+                let peakY = baseY + od * (0.45 + r3 * 0.35);
 
                 // Window: fill with far parallax depth colour
                 if (isWindow) {
@@ -2256,7 +2374,7 @@ class ScubaFlowScene extends Phaser.Scene {
                     g.beginPath();
                     g.moveTo(leftX, baseY);
                     g.lineTo(midX1, peakY);
-                    g.lineTo(cx,    deepY);
+                    g.lineTo(cx, deepY);
                     g.lineTo(midX2, peakY);
                     g.lineTo(rightX, baseY);
                     g.closePath();
@@ -2268,7 +2386,7 @@ class ScubaFlowScene extends Phaser.Scene {
                 g.beginPath();
                 g.moveTo(leftX, baseY);
                 g.lineTo(midX1, peakY);
-                g.lineTo(cx,    deepY);
+                g.lineTo(cx, deepY);
                 g.lineTo(midX2, peakY);
                 g.lineTo(rightX, baseY);
                 g.closePath();
@@ -2279,31 +2397,31 @@ class ScubaFlowScene extends Phaser.Scene {
                 g.beginPath();
                 g.moveTo(leftX, baseY);
                 g.lineTo(midX1, peakY);
-                g.lineTo(cx,    deepY);
+                g.lineTo(cx, deepY);
                 g.lineTo(midX2, peakY);
                 g.lineTo(rightX, baseY);
                 g.strokePath();
 
             } else {
                 // Crack / side-tunnel opening IN the ceiling wall
-                let baseY   = ceilY;        // surface of ceiling at cx
-                let leftX   = cx - ow / 2;
-                let rightX  = cx + ow / 2;
-                let deepY   = baseY - od;   // top of the pocket (into rock above)
+                let baseY = ceilY;        // surface of ceiling at cx
+                let leftX = cx - ow / 2;
+                let rightX = cx + ow / 2;
+                let deepY = baseY - od;   // top of the pocket (into rock above)
 
                 let r1 = this._seededRnd(slot * 83 + 9);
                 let r2 = this._seededRnd(slot * 89 + 11);
                 let r3 = this._seededRnd(slot * 97 + 13);
-                let midX1  = leftX  + ow * (0.22 + r1 * 0.15);
-                let midX2  = leftX  + ow * (0.58 + r2 * 0.15);
-                let peakY  = baseY  - od * (0.40 + r3 * 0.35);
+                let midX1 = leftX + ow * (0.22 + r1 * 0.15);
+                let midX2 = leftX + ow * (0.58 + r2 * 0.15);
+                let peakY = baseY - od * (0.40 + r3 * 0.35);
 
                 if (isWindow) {
                     g.fillStyle(farColor, 0.55 + farAlpha);
                     g.beginPath();
                     g.moveTo(leftX, baseY);
                     g.lineTo(midX1, peakY);
-                    g.lineTo(cx,    deepY);
+                    g.lineTo(cx, deepY);
                     g.lineTo(midX2, peakY);
                     g.lineTo(rightX, baseY);
                     g.closePath();
@@ -2314,7 +2432,7 @@ class ScubaFlowScene extends Phaser.Scene {
                 g.beginPath();
                 g.moveTo(leftX, baseY);
                 g.lineTo(midX1, peakY);
-                g.lineTo(cx,    deepY);
+                g.lineTo(cx, deepY);
                 g.lineTo(midX2, peakY);
                 g.lineTo(rightX, baseY);
                 g.closePath();
@@ -2324,7 +2442,7 @@ class ScubaFlowScene extends Phaser.Scene {
                 g.beginPath();
                 g.moveTo(leftX, baseY);
                 g.lineTo(midX1, peakY);
-                g.lineTo(cx,    deepY);
+                g.lineTo(cx, deepY);
                 g.lineTo(midX2, peakY);
                 g.lineTo(rightX, baseY);
                 g.strokePath();
@@ -2336,7 +2454,7 @@ class ScubaFlowScene extends Phaser.Scene {
         this.collectiblesGroup = this.add.group();
 
         for (let col of this.levelData.collectibles) {
-            let colX = (col.time / 1000) * this.baseScrollSpeed;
+            let colX = 250 + (col.time / 1000) * this.baseScrollSpeed;
             let debris = this.add.sprite(colX, col.y, 'collectible');
             debris.setOrigin(0.5);
 
@@ -2362,22 +2480,22 @@ class ScubaFlowScene extends Phaser.Scene {
         let targetAlpha = this.siltActive ? 0.12 : 0.95;
 
         // Build body hitbox list (mirrors update() collision checkpoints)
-        let collectPts = [{ x: 0, y: 0, r: 8 }]; // fallback for non-diver
+        let collectPts = [{ x: 0, y: 0, r: 6.5 }]; // fallback for non-diver
         if (this.avatarType === 'diver') {
             let frogPhase = (this.elapsedTime / 350) % (Math.PI * 2);
-            let ke  = Math.max(0, Math.sin(frogPhase));
+            let ke = Math.max(0, Math.sin(frogPhase));
             let ke2 = Math.max(0, Math.sin(frogPhase + 0.25));
-            let f2x = -8  - (6 + ke  * 8) - (2 + ke  * 12);
-            let f2y = -6  - (12 - ke  * 8) - (10 - ke  * 10);
+            let f2x = -8 - (6 + ke * 8) - (2 + ke * 12);
+            let f2y = -6 - (12 - ke * 8) - (10 - ke * 10);
             let f1x = -10 - (6 + ke2 * 8) - (2 + ke2 * 12);
-            let f1y =  2  - (12 - ke2 * 8) - (10 - ke2 * 10);
+            let f1y = 2 - (12 - ke2 * 8) - (10 - ke2 * 10);
             collectPts = [
-                { x: 0,   y: 0,   r: 8 },  // torso
-                { x: 14,  y: -4,  r: 5 },  // head
-                { x: -10, y: -13, r: 3 },  // tank
-                { x: 26,  y: -2,  r: 4 },  // hand
-                { x: f1x, y: f1y, r: 5 },  // foot 1 + fin
-                { x: f2x, y: f2y, r: 5 },  // foot 2 + fin
+                { x: 0, y: 0, r: 6.5 },  // torso
+                { x: 14, y: -4, r: 4 },    // head
+                { x: -10, y: -13, r: 2 },    // tank
+                { x: 26, y: -2, r: 3 },    // hand
+                { x: f1x, y: f1y, r: 4 },    // foot 1 + fin
+                { x: f2x, y: f2y, r: 4 },    // foot 2 + fin
             ];
         }
 
@@ -2490,9 +2608,21 @@ class ScubaFlowScene extends Phaser.Scene {
         });
     }
 
-    triggerPsychedelicSilt(source = 'floor') {
+    triggerPsychedelicSilt(source = 'floor', impactVy = 0) {
         this.siltSource = source;
-        this.siltTime = this.siltDuration;
+
+        // Dynamically scale silt-out duration based on impact speed (absolute vy)
+        let impactSpeed = Math.abs(impactVy);
+        let scale = Phaser.Math.Clamp(impactSpeed / 70, 0.44, 1.33); // range: ~0.8s to ~2.4s
+
+        // Scale duration inversely with level scroll speed to keep blind travel distance consistent
+        let speedFactor = 50 / this.baseScrollSpeed;
+        let currentDuration = this.siltDuration * scale * speedFactor;
+        this.siltTime = currentDuration;
+        this.currentSiltDuration = currentDuration;
+
+        // Shift baseHue complementary (120 degrees) on each bump to dramatically shift the visual color palette
+        this.baseHue = (this.baseHue + 120) % 360;
 
         if (!this.siltActive) {
             this.siltActive = true;
@@ -2540,7 +2670,7 @@ class ScubaFlowScene extends Phaser.Scene {
         if (!this.siltVignetteImage) return;
 
         if (this.siltActive) {
-            let phase = this.siltTime / this.siltDuration;
+            let phase = this.siltTime / (this.currentSiltDuration || this.siltDuration);
 
             let siltHue = (this.baseHue + 180) % 360;
             let colorObj = Phaser.Display.Color.HSLToColor(siltHue / 360, 0.75, 0.25);
@@ -2608,8 +2738,8 @@ class ScubaFlowScene extends Phaser.Scene {
         let slope = (y2 - y1) / 10;
 
         // Compute minimum half-height clearance needed for player's horizontal bounding box
-        // Negative slopes (climbing) require significantly more vertical clearance.
-        let slopeClearance = 28.5 + (slope < 0 ? -29.0 * slope : 15.0 * slope);
+        // Sinking/descending is harder to react to, so downward slopes get symmetric/sufficient clearance.
+        let slopeClearance = 28.5 + (slope < 0 ? -29.0 * slope : 32.0 * slope);
 
         // Ensure baseOffset expands to allow clearance plus some margin
         let baseOffset = Math.max(78 - localEnergy * 22, slopeClearance + 5); // 56–78px minimum base
@@ -2632,9 +2762,9 @@ class ScubaFlowScene extends Phaser.Scene {
         // Guarantee 100% collectability without wall collisions:
         // Max downward offset is 40px (+8px player torso + 16px safety margin = 64px min floor offset)
         // Max upward offset is 28px (+16px player top + 16px safety margin = 60px min ceiling offset)
-        return { 
-            floorOffset: Math.max(64, floorOffset), 
-            ceilOffset: Math.max(60, ceilOffset) 
+        return {
+            floorOffset: Math.max(64, floorOffset),
+            ceilOffset: Math.max(60, ceilOffset)
         };
     }
 
@@ -2681,6 +2811,7 @@ class ScubaFlowScene extends Phaser.Scene {
 
         this.musicSource.onended = () => {
             console.log("musicSource onended fired");
+            this.musicCompleted = true;
             if (!this.isFadingOut && !this.isLevelCompleted) {
                 this.startFadeout();
             }
@@ -2922,7 +3053,7 @@ class ScubaFlowScene extends Phaser.Scene {
             card.appendChild(styleSheet);
         }
 
-        let titleStyle = isPerfect 
+        let titleStyle = isPerfect
             ? 'background: linear-gradient(135deg, #00f0ff 0%, #ff00e4 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-size: 3.6rem; font-weight: 800; margin-bottom: 20px; letter-spacing: 3px; filter: drop-shadow(0 0 10px rgba(0, 240, 255, 0.6));'
             : 'background: linear-gradient(135deg, #00f0ff 0%, #bd00ff 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-size: 3rem; font-weight: 700; margin-bottom: 20px; letter-spacing: 2px;';
 
@@ -2956,7 +3087,8 @@ class ScubaFlowScene extends Phaser.Scene {
         let sampleRate = audioBuffer.sampleRate;
         let channelData = audioBuffer.getChannelData(0);
 
-        let levelLengthMs = duration * 1000;
+        let songLengthMs = duration * 1000;
+        let levelLengthMs = songLengthMs + 45000;
 
         let seed = this.getAudioBufferHash(audioBuffer);
         let rng = this.createMulberry32(seed);
@@ -3031,11 +3163,11 @@ class ScubaFlowScene extends Phaser.Scene {
 
         // If track is very quiet, ambient, or spoken-word, it may yield almost no beats.
         // Fall back to a steady, relaxing 60 BPM rhythm (every 1000ms) to ensure gameplay remains engaging.
-        let minExpectedBeats = levelLengthMs / 5000;
+        let minExpectedBeats = songLengthMs / 5000;
         if (beats.length < minExpectedBeats) {
             console.log(`Procedural fallback: detected only ${beats.length} beats. Generating a relaxing 60 BPM grid.`);
             beats = [];
-            for (let t = 2000; t < levelLengthMs - 2000; t += 1000) {
+            for (let t = 2000; t < songLengthMs - 2000; t += 1000) {
                 beats.push(t);
             }
         }
@@ -3081,14 +3213,22 @@ class ScubaFlowScene extends Phaser.Scene {
 
         let path = [];
         // Scale slope difficulty based on scroll speed to guarantee climbs/descents are physically navigateable
-        let maxDeltaY = 40.0; 
+        let maxDeltaY = 40.0;
         if (this.baseScrollSpeed === 45) {
             maxDeltaY = 30.0; // gentle but still dynamic and fun slopes on calm tracks
         }
         let prevY = 250;
 
-        for (let i = 0; i < smoothedEnergy.length; i++) {
-            let norm = 0.5 + ((smoothedEnergy[i] - avgSmoothed) / energyRange);
+        let totalChunks = Math.floor(levelLengthMs / (windowSec * 1000));
+        for (let i = 0; i < totalChunks; i++) {
+            let energyVal;
+            if (i < smoothedEnergy.length) {
+                energyVal = smoothedEnergy[i];
+            } else {
+                let wrapIdx = i % smoothedEnergy.length;
+                energyVal = smoothedEnergy[wrapIdx];
+            }
+            let norm = 0.5 + ((energyVal - avgSmoothed) / energyRange);
             // Only compress dynamic range to keep the path flat if the song is actually flat/low-dynamic
             let normLimit = isLowDynamicRange ? 0.20 : 0.40;
             norm = Math.max(0.5 - normLimit, Math.min(0.5 + normLimit, norm));
@@ -3109,8 +3249,8 @@ class ScubaFlowScene extends Phaser.Scene {
                 targetY = prevY + Math.sign(dy) * maxDeltaY;
             }
 
-            if (timeMs < 4000) {
-                let tRatio = timeMs / 4000;
+            if (timeMs < 3000) {
+                let tRatio = timeMs / 3000;
                 targetY = 250 + (targetY - 250) * tRatio;
             } else if (timeMs > levelLengthMs - 2000) {
                 let tRatio = (levelLengthMs - timeMs) / 2000;
@@ -3129,56 +3269,71 @@ class ScubaFlowScene extends Phaser.Scene {
         this.clusterCollected = {};
 
         let forceSpawnThreshold = spacerTime * 1.2;
-        for (let i = 1; i < rawEnergy.length - 1; i++) {
+        let numCollectibleChunks = Math.floor(songLengthMs / (windowSec * 1000));
+        for (let i = 1; i < numCollectibleChunks - 1; i++) {
             let timeMs = i * windowSec * 1000;
 
-            if (timeMs < 4000 || timeMs > levelLengthMs - 1200) continue;
+            if (timeMs < 3000 || timeMs > songLengthMs - 1200) continue;
 
-            let isPeak = (rawEnergy[i] > rawEnergy[i - 1] && rawEnergy[i] > rawEnergy[i + 1]) && (rawEnergy[i] > maxRawEnergy * 0.22);
+            let energyVal, prevEnergyVal, nextEnergyVal, smoothedEnergyVal;
+            if (i < rawEnergy.length) {
+                energyVal = rawEnergy[i];
+                prevEnergyVal = rawEnergy[i - 1];
+                nextEnergyVal = rawEnergy[i + 1];
+                smoothedEnergyVal = smoothedEnergy[i];
+            } else {
+                let wrapIdx = i % rawEnergy.length;
+                energyVal = rawEnergy[wrapIdx];
+                prevEnergyVal = rawEnergy[(i - 1) % rawEnergy.length];
+                nextEnergyVal = rawEnergy[(i + 1) % rawEnergy.length];
+                smoothedEnergyVal = smoothedEnergy[wrapIdx];
+            }
+
+            let isPeak = (energyVal > prevEnergyVal && energyVal > nextEnergyVal) && (energyVal > maxRawEnergy * 0.22);
             let forceSpawn = (timeMs - lastColTime >= forceSpawnThreshold);
 
             if (isPeak || forceSpawn) {
                 if (timeMs - lastColTime >= spacerTime) {
-                        let norm = forceSpawn ? rng() : (smoothedEnergy[i] / maxEnergy);
-                        let pathIndex = Math.min(path.length - 1, Math.floor(timeMs / (windowSec * 1000)));
-                        let pathY = path[pathIndex].y;
-                        let cid = "c_" + i;
+                    let norm = forceSpawn ? rng() : (smoothedEnergyVal / maxEnergy);
+                    let pathIndex = Math.min(path.length - 1, Math.floor(timeMs / (windowSec * 1000)));
+                    let pathY = path[pathIndex].y;
+                    let cid = "c_" + i;
 
-                        if (norm < 0.35) {
-                            // Pattern 1: Single item at path center
-                            collectibles.push({ time: timeMs, y: pathY, clusterId: cid });
-                            this.clusterTotals[cid] = 1;
-                        } else if (norm < 0.65) {
-                            // Pattern 2: Smooth sine wave curve (4 items)
-                            this.clusterTotals[cid] = 4;
-                            for (let k = 0; k < 4; k++) {
-                                let colTime = timeMs + k * 350;
-                                let colPathIndex = Math.min(path.length - 1, Math.floor(colTime / (windowSec * 1000)));
-                                let colPathY = path[colPathIndex].y;
-                                // Smooth sine wave offset (balanced to fit safe navigation bounds: Max upward -28, Max downward 40)
-                                let rawOffset = Math.sin(k * Math.PI / 2) * 35;
-                                let offset = rawOffset < 0 ? Math.max(rawOffset, -28) : Math.min(rawOffset, 40);
-                                collectibles.push({ time: colTime, y: colPathY + offset, clusterId: cid });
-                            }
-                        } else {
-                            // Pattern 3: Steeper ascending or descending slope (5 items)
-                            let isAscending = rng() > 0.5;
-                            this.clusterTotals[cid] = 5;
-                            for (let k = 0; k < 5; k++) {
-                                let colTime = timeMs + k * 300;
-                                let colPathIndex = Math.min(path.length - 1, Math.floor(colTime / (windowSec * 1000)));
-                                let colPathY = path[colPathIndex].y;
-                                // Interpolate (steeper slope for challenge, scaled to fit safe navigation bounds: Max upward -28, Max downward 40)
-                                let ratio = (k / 4) * 2 - 1; // -1 to 1
-                                let rawOffset = ratio * (isAscending ? -45 : 45);
-                                let offset = rawOffset < 0 ? Math.max(rawOffset, -28) : Math.min(rawOffset, 40);
-                                collectibles.push({ time: colTime, y: colPathY + offset, clusterId: cid });
-                            }
+                    if (norm < 0.35) {
+                        // Pattern 1: Single item at path center
+                        collectibles.push({ time: timeMs, y: pathY, clusterId: cid });
+                        this.clusterTotals[cid] = 1;
+                    } else if (norm < 0.65) {
+                        // Pattern 2: Smooth sine wave curve (4 items)
+                        this.clusterTotals[cid] = 4;
+                        for (let k = 0; k < 4; k++) {
+                            let colTime = timeMs + k * 350;
+                            let colPathIndex = Math.min(path.length - 1, Math.floor(colTime / (windowSec * 1000)));
+                            let colPathY = path[colPathIndex].y;
+                            // Smooth sine wave offset (balanced to fit safe navigation bounds: Max upward -28, Max downward 40)
+                            let rawOffset = Math.sin(k * Math.PI / 2) * 35;
+                            let offset = rawOffset < 0 ? Math.max(rawOffset, -28) : Math.min(rawOffset, 40);
+                            collectibles.push({ time: colTime, y: colPathY + offset, clusterId: cid });
                         }
-                        // Update lastColTime to avoid overlaps
-                        lastColTime = timeMs + 1800;
+                    } else {
+                        // Pattern 3: Steeper ascending or descending slope (5 items)
+                        let isAscending = rng() > 0.5;
+                        this.clusterTotals[cid] = 5;
+                        for (let k = 0; k < 5; k++) {
+                            let colTime = timeMs + k * 300;
+                            let colPathIndex = Math.min(path.length - 1, Math.floor(colTime / (windowSec * 1000)));
+                            let colPathY = path[colPathIndex].y;
+                            // Interpolate (steeper slope for challenge, scaled to fit safe navigation bounds: Max upward -28, Max downward 40)
+                            let ratio = (k / 4) * 2 - 1; // -1 to 1
+                            let rawOffset = ratio * (isAscending ? -45 : 45);
+                            let offset = rawOffset < 0 ? Math.max(rawOffset, -28) : Math.min(rawOffset, 40);
+                            collectibles.push({ time: colTime, y: colPathY + offset, clusterId: cid });
+                        }
                     }
+                    // Update lastColTime to avoid overlaps
+                    lastColTime = timeMs + 1800;
                 }
+            }
         }
 
         let zoneNames = ["Neon Reef", "Gold Ridge", "Magenta Arch", "Abyssal Trench", "Cyan Ascent"];
@@ -3220,14 +3375,16 @@ class ScubaFlowScene extends Phaser.Scene {
         this.levelData = {
             bpm: 60,
             levelLengthMs: levelLengthMs,
+            songLengthMs: songLengthMs,
             path: path,
             collectibles: collectibles,
             zones: zones,
             beats: beats
         };
         this.totalCollectibles = collectibles.length;
-        this.flowMilestoneInterval = Math.max(6000, Math.min(15000, levelLengthMs / 15));
+        this.flowMilestoneInterval = Math.max(6000, Math.min(15000, songLengthMs / 15));
         this.maxPotentialPoints = this.calculateMaxPotentialPoints();
+        this.targetEndX = (songLengthMs / 1000) * this.baseScrollSpeed + 250;
 
         console.log(`Procedural Level Generated! Beats: ${beats.length}, Collectibles: ${this.totalCollectibles}`);
     }
@@ -3244,9 +3401,9 @@ class ScubaFlowScene extends Phaser.Scene {
 
         let events = [];
 
-        // 1. Flow milestones (every flowMilestoneInterval up to levelLengthMs + 2000)
+        // 1. Flow milestones (every flowMilestoneInterval up to songLengthMs + 2000)
         let interval = this.flowMilestoneInterval || 10000;
-        let totalDuration = this.levelData.levelLengthMs + 2000;
+        let totalDuration = this.levelData.songLengthMs + 2000;
         for (let t = interval; t <= totalDuration; t += interval) {
             events.push({
                 type: 'flow',
@@ -3256,13 +3413,9 @@ class ScubaFlowScene extends Phaser.Scene {
 
         // 2. Collectible collection events
         for (let col of sortedCollectibles) {
-            // Player starts at x=250.
-            // Collectible at col.time is at colX = (col.time / 1000) * baseScrollSpeed.
-            // Player reaches it at tReach = col.time - (250 / baseScrollSpeed) * 1000.
-            let tReach = col.time - (250 / this.baseScrollSpeed) * 1000;
             events.push({
                 type: 'collectible',
-                time: tReach,
+                time: col.time,
                 clusterId: col.clusterId
             });
         }
@@ -3369,10 +3522,10 @@ class ScubaFlowScene extends Phaser.Scene {
 
         // Verify collectibles generated on silent track
         console.assert(this.levelData.collectibles.length > 0, `Assertion Failed: Silent tracks must still generate collectibles to avoid empty tunnels`);
-        
-        // Check maximum gap between collectibles in the playable region (4s to duration - 1.2s)
+
+        // Check maximum gap between collectibles in the playable region (3s to duration - 1.2s)
         let sortedCols = [...this.levelData.collectibles].sort((a, b) => a.time - b.time);
-        let lastTime = 4000;
+        let lastTime = 3000;
         for (let col of sortedCols) {
             let gap = col.time - lastTime;
             console.assert(gap <= 6800, `Assertion Failed: Large gap between collectibles detected: ${gap}ms`);
@@ -3382,11 +3535,11 @@ class ScubaFlowScene extends Phaser.Scene {
         // Test 8: Deterministic generation and hashing
         // First generation (saved in this.levelData after generateProceduralLevel(mockAudio))
         let run1Collectibles = [...this.levelData.collectibles];
-        
+
         // Second generation with the exact same mockAudio
         this.generateProceduralLevel(mockAudio);
         let run2Collectibles = [...this.levelData.collectibles];
-        
+
         console.assert(run1Collectibles.length === run2Collectibles.length, "Assertion Failed: Determinism check - collectible counts differ");
         for (let i = 0; i < run1Collectibles.length; i++) {
             console.assert(run1Collectibles[i].time === run2Collectibles[i].time, `Assertion Failed: Determinism check - collectible time mismatch at index ${i}`);
@@ -3406,13 +3559,13 @@ class ScubaFlowScene extends Phaser.Scene {
         };
         this.generateProceduralLevel(mockAudio2);
         let run3Collectibles = [...this.levelData.collectibles];
-        
+
         // Assert that different audio data produces different level layouts
         let isIdentical = (run1Collectibles.length === run3Collectibles.length);
         if (isIdentical) {
             for (let i = 0; i < run1Collectibles.length; i++) {
-                if (run1Collectibles[i].time !== run3Collectibles[i].time || 
-                    run1Collectibles[i].y !== run3Collectibles[i].y || 
+                if (run1Collectibles[i].time !== run3Collectibles[i].time ||
+                    run1Collectibles[i].y !== run3Collectibles[i].y ||
                     run1Collectibles[i].clusterId !== run3Collectibles[i].clusterId) {
                     isIdentical = false;
                     break;
@@ -3420,6 +3573,34 @@ class ScubaFlowScene extends Phaser.Scene {
             }
         }
         console.assert(!isIdentical, "Assertion Failed: Hashing check - different audio data did not produce a different layout");
+
+        // Test 9: Web Audio API time-step and jitter calculation
+        let simElapsed = 0;
+        let simPrevElapsed = 0;
+        let mockAudioCtxTime = 0.0;
+        let mockMusicStartTime = 0.0;
+
+        // Frame 1
+        simPrevElapsed = simElapsed;
+        simElapsed = (mockAudioCtxTime - mockMusicStartTime) * 1000;
+        let dt1 = (simElapsed - simPrevElapsed) / 1000;
+        if (dt1 < 0) dt1 = 0;
+
+        // Frame 2 (Jitter: Audio clock does not advance)
+        simPrevElapsed = simElapsed;
+        simElapsed = (mockAudioCtxTime - mockMusicStartTime) * 1000;
+        let dt2 = (simElapsed - simPrevElapsed) / 1000;
+        if (dt2 < 0) dt2 = 0;
+
+        // Frame 3 (Audio clock advances to 33.3ms)
+        mockAudioCtxTime = 0.0333;
+        simPrevElapsed = simElapsed;
+        simElapsed = (mockAudioCtxTime - mockMusicStartTime) * 1000;
+        let dt3 = (simElapsed - simPrevElapsed) / 1000;
+        if (dt3 < 0) dt3 = 0;
+
+        let totalDt = dt1 + dt2 + dt3;
+        console.assert(Math.abs(totalDt - 0.0333) < 0.0001, `Assertion Failed: Expect total dt to be 0.0333, got ${totalDt}`);
 
         // Restore original state
         this.levelData = originalLevelData;
