@@ -387,7 +387,7 @@ class ScubaFlowScene extends Phaser.Scene {
                 this.elapsedTime += delta;
             }
             let dt = (this.elapsedTime - prevElapsedTime) / 1000;
-            if (dt <= 0) dt = delta / 1000; // fallback to prevent division by zero/negative steps
+            if (dt < 0) dt = 0; // Prevent negative time steps due to clock jitter
             let deltaMs = dt * 1000;
             let physDt = Math.min(dt, 0.15); // cap physics step to prevent physics engine explosions
 
@@ -476,7 +476,9 @@ class ScubaFlowScene extends Phaser.Scene {
                 this.player.y = Phaser.Math.Linear(this.player.y, targetY, 1 - Math.exp(-6 * physDt));
                 
                 // Calculate simulated velocity
-                this.vy = (this.player.y - lastY) / physDt;
+                if (physDt > 0) {
+                    this.vy = (this.player.y - lastY) / physDt;
+                }
             }
 
             // Standard input & lung volume simulation (shared between manual & autopilot)
@@ -575,7 +577,9 @@ class ScubaFlowScene extends Phaser.Scene {
                 }
 
                 // Update vy post-clamp for visual/audio effects
-                this.vy = (this.player.y - lastY) / physDt;
+                if (physDt > 0) {
+                    this.vy = (this.player.y - lastY) / physDt;
+                }
             }
 
             // 4. Cave Boundaries & Local Energy Calculation
@@ -834,7 +838,7 @@ class ScubaFlowScene extends Phaser.Scene {
             this.drawCaveLights();
             this.drawPlayerVisuals(time);
             this.drawBuddyVisuals(time);
-            this.drawForegroundBubbles(dt);
+            this.drawForegroundBubbles(delta / 1000);
             this.drawSiltOverlay();
 
             // 11. Check Collectibles steering
@@ -3562,6 +3566,34 @@ class ScubaFlowScene extends Phaser.Scene {
             }
         }
         console.assert(!isIdentical, "Assertion Failed: Hashing check - different audio data did not produce a different layout");
+ 
+        // Test 9: Web Audio API time-step and jitter calculation
+        let simElapsed = 0;
+        let simPrevElapsed = 0;
+        let mockAudioCtxTime = 0.0;
+        let mockMusicStartTime = 0.0;
+        
+        // Frame 1
+        simPrevElapsed = simElapsed;
+        simElapsed = (mockAudioCtxTime - mockMusicStartTime) * 1000;
+        let dt1 = (simElapsed - simPrevElapsed) / 1000;
+        if (dt1 < 0) dt1 = 0;
+        
+        // Frame 2 (Jitter: Audio clock does not advance)
+        simPrevElapsed = simElapsed;
+        simElapsed = (mockAudioCtxTime - mockMusicStartTime) * 1000;
+        let dt2 = (simElapsed - simPrevElapsed) / 1000;
+        if (dt2 < 0) dt2 = 0;
+        
+        // Frame 3 (Audio clock advances to 33.3ms)
+        mockAudioCtxTime = 0.0333;
+        simPrevElapsed = simElapsed;
+        simElapsed = (mockAudioCtxTime - mockMusicStartTime) * 1000;
+        let dt3 = (simElapsed - simPrevElapsed) / 1000;
+        if (dt3 < 0) dt3 = 0;
+        
+        let totalDt = dt1 + dt2 + dt3;
+        console.assert(Math.abs(totalDt - 0.0333) < 0.0001, `Assertion Failed: Expect total dt to be 0.0333, got ${totalDt}`);
 
         // Restore original state
         this.levelData = originalLevelData;
