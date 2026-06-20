@@ -52,7 +52,7 @@ All gameplay feedback is represented physically and auditorily:
 - **Depth**: Indicated by ambient background HSL color shifts (darkening/shifting colors) and the buddy's depth.
 - **Lung Volume**: Indicated by player sprite chest expansion (ellipse scaling) and breathing audio synth frequencies.
 - **Failure - Silt-Out**: Floor/ceiling collision blinds the player with particle clouds. The player must wait for the silt to clear while staying steady.
-- **AI Buddy**: Displays helper speech bubbles ("👌?", "👌!") when assisting the player or clearing/recovering from silt. The buddy demonstrates perfect buoyancy by utilizing the standard physics engine steered via a PD control loop. Tight safe (15px margin) and absolute (2px margin/midpoint fallback) terrain-clamping runs post-physics to ensure they never collide with the walls or raise sediment on their own, while keeping the buddy silent (no breathing synth, bubble triggers, or chest-scaling dynamics).
+- **AI Buddy**: Displays helper speech bubbles ("👌?", "👌!") when assisting the player or clearing/recovering from silt. The buddy demonstrates perfect buoyancy, utilizing a safe (15px margin) and absolute (2px margin/midpoint fallback) terrain-clamping algorithm so they never collide with the walls or raise sediment on their own.
 
 ---
 
