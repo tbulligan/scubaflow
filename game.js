@@ -332,7 +332,7 @@ class ScubaFlowScene extends Phaser.Scene {
                 this.simulatedSpaceDown = (breathPhase < 0.5);
 
                 // Smoothly guide player along the centerline with a natural breathing bobbing effect (12px amplitude)
-                let targetY = pPathY + Math.sin(breathPhase * Math.PI * 2) * 12;
+                let targetY = pPathY - Math.sin(breathPhase * Math.PI * 2) * 12;
 
                 // Clamp targetY inside the corridor so we don't try to steer past walls
                 let minYAllowed = -9999;
@@ -380,7 +380,12 @@ class ScubaFlowScene extends Phaser.Scene {
             // Audio Breathing Volumes
             let ctx = this.audioContext;
             if (ctx) {
-                if (spaceDown) {
+                if (this.useAutopilot) {
+                    // Mute inhale/exhale synths completely in music visualizer mode
+                    this.inhaleGain.gain.setTargetAtTime(0.0, ctx.currentTime, 0.05);
+                    this.exhaleGain.gain.setTargetAtTime(0.0, ctx.currentTime, 0.05);
+                    this.lastBubbleSoundTime = 0;
+                } else if (spaceDown) {
                     this.inhaleGain.gain.setTargetAtTime(0.10, ctx.currentTime, 0.05);
                     this.exhaleGain.gain.setTargetAtTime(0.0, ctx.currentTime, 0.05);
                     this.inhaleFilter.frequency.setValueAtTime(300 + this.V_lung * 600, ctx.currentTime);
@@ -2653,7 +2658,9 @@ class ScubaFlowScene extends Phaser.Scene {
         this.inhaleSource.connect(this.inhaleFilter);
         this.inhaleFilter.connect(this.inhaleGain);
         this.inhaleGain.connect(this.masterGain);
-        this.inhaleSource.start(0);
+        if (!this.useAutopilot) {
+            this.inhaleSource.start(0);
+        }
 
         // Exhale
         this.exhaleFilter = ctx.createBiquadFilter();
@@ -2670,10 +2677,13 @@ class ScubaFlowScene extends Phaser.Scene {
         this.exhaleSource.connect(this.exhaleFilter);
         this.exhaleFilter.connect(this.exhaleGain);
         this.exhaleGain.connect(this.masterGain);
-        this.exhaleSource.start(0);
+        if (!this.useAutopilot) {
+            this.exhaleSource.start(0);
+        }
     }
 
     playCollectibleTone() {
+        if (this.useAutopilot) return; // Mute in music visualizer mode
         let ctx = this.audioContext;
         if (!ctx) return;
 
@@ -2695,6 +2705,7 @@ class ScubaFlowScene extends Phaser.Scene {
     }
 
     playSiltThump() {
+        if (this.useAutopilot) return; // Mute in music visualizer mode
         let ctx = this.audioContext;
         if (!ctx) return;
 
@@ -2721,6 +2732,7 @@ class ScubaFlowScene extends Phaser.Scene {
     }
 
     playBubbleChirp() {
+        if (this.useAutopilot) return; // Mute in music visualizer mode
         let ctx = this.audioContext;
         if (!ctx) return;
 
