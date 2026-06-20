@@ -322,31 +322,17 @@ class ScubaFlowScene extends Phaser.Scene {
 
             // 2. Process Input & Buoyancy State
             if (this.useAutopilot) {
-                // Autopilot target calculation: find weighted average Y of centerline and upcoming collectibles
                 let px = this.player.x;
                 let timeAtPlayer = (px / this.baseScrollSpeed) * 1000;
                 let pPathY = this.getTargetYAtTime(timeAtPlayer);
-                let targetY = pPathY;
 
-                let lookAheadStart = 15; // px
-                let lookAheadEnd = 300; // px
-                let totalWeight = 1.0;
-                let weightedY = pPathY * 1.0; // Base weight on centerline path
+                // Periodic breathing cycle (3.6 seconds per breath cycle: 1.8s inhale, 1.8s exhale)
+                let breathPeriod = 3600; // ms
+                let breathPhase = (time % breathPeriod) / breathPeriod; // 0 to 1
+                this.simulatedSpaceDown = (breathPhase < 0.5);
 
-                if (this.collectiblesGroup && this.collectiblesGroup.children) {
-                    this.collectiblesGroup.children.iterate((debris) => {
-                        if (debris && debris.active) {
-                            let dx = debris.x - px;
-                            if (dx > lookAheadStart && dx < lookAheadEnd) {
-                                // Weight increases exponentially as we get closer to the debris
-                                let weight = Math.pow((lookAheadEnd - dx) / (lookAheadEnd - lookAheadStart), 2);
-                                weightedY += debris.y * weight * 2.5;
-                                totalWeight += weight * 2.5;
-                            }
-                        }
-                    });
-                }
-                targetY = weightedY / totalWeight;
+                // Smoothly guide player along the centerline with a natural breathing bobbing effect (12px amplitude)
+                let targetY = pPathY + Math.sin(breathPhase * Math.PI * 2) * 12;
 
                 // Clamp targetY inside the corridor so we don't try to steer past walls
                 let minYAllowed = -9999;
@@ -380,13 +366,6 @@ class ScubaFlowScene extends Phaser.Scene {
                 
                 // Calculate simulated velocity
                 this.vy = (this.player.y - lastY) / dt;
-
-                // Sync simulated input spaceDown based on actual vertical velocity direction
-                if (this.vy < -10) {
-                    this.simulatedSpaceDown = true; // Inhale when rising
-                } else if (this.vy > 10) {
-                    this.simulatedSpaceDown = false; // Exhale when sinking
-                }
             }
 
             // Standard input & lung volume simulation (shared between manual & autopilot)

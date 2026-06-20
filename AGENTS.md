@@ -33,9 +33,9 @@ The repository code is the absolute source of truth:
 
 ### Autopilot & Music Visualizer Mode
 - When Autopilot is toggled in the start menu, vertical buoyancy controls are taken over:
-  - **Targeting**: The system looks ahead up to $400\text{px}$ for the nearest active neon debris. If no debris is nearby, it defaults to the center of the cave path.
+  - **Pathing**: To achieve maximum flow and visual smoothness, the visualizer mode ignores individual debris lookahead (preventing micro-jerks) and steers the diver along the smooth centerline of the cave path (`pPathY`) modulated by a rhythmic 3.6-second sinusoidal breathing oscillation.
   - **Safety Clamping**: To prevent silt-outs, the target coordinate is dynamically clamped against all multi-point player shape checkpoints with a safe $12\text{px}$ clearance buffer from the cave ceiling and floor.
-  - **Visual & Audio Sync**: The player glides smoothly to the target using exponential linear interpolation. To preserve the zero-HUD diegetic feel, the simulated input drives $V_{lung}$ physics, chest expansion scaling, bubble release, and breathing synth frequencies.
+  - **Visual & Audio Sync**: The player glides smoothly to the clamped target using exponential linear interpolation. To preserve the zero-HUD diegetic feel, a simulated spacebar input (`this.simulatedSpaceDown`) toggles on a periodic 3.6-second breathing cycle (inhaling for 1.8s, exhaling for 1.8s). This drives natural $V_{lung}$ integration, chest expansion scaling, bubble release, and breathing synth frequencies.
 
 ### Slope Clearance & Collision Navigability
 - To prevent impossible collisions where steep slopes narrow the corridor below the clearance of the player's horizontally extended $64\text{px}$ shape (fins to outstretched arm):
