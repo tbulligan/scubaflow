@@ -14,6 +14,8 @@ class ScubaFlowScene extends Phaser.Scene {
         this.baseScrollSpeed = 40;
         this.useAutopilot = window.useAutopilot || false;
         this.simulatedSpaceDown = false;
+        this.countdownActive = false;
+        this.countdownText = null;
 
         // Simplified Agile Buoyancy Physics
         this.V_lung = 0.5; // target state [0 = full sink, 1 = full rise]
@@ -36,6 +38,7 @@ class ScubaFlowScene extends Phaser.Scene {
         this.siltTime = 0;
         this.siltDuration = 1800; // 1.8 seconds recovery distortion — shorter for playability
         this.siltSource = 'floor';
+        this.currentSiltDuration = 1800;
 
         // Buddy State Machine
         this.buddyState = 'normal'; // 'normal', 'assisting', 'relieved'
@@ -229,18 +232,14 @@ class ScubaFlowScene extends Phaser.Scene {
                             this.cameras.main.startFollow(this.player, true, 0.1, 1, -250, 0);
                             console.log("Camera follow configured.");
 
-                            console.log("Starting setupAudioEngine...");
-                            this.setupAudioEngine(ctx);
-                            console.log("setupAudioEngine completed.");
-
-                            this.isPlaying = true;
-                            console.log("Gameplay isPlaying set to true.");
-
                             // ONLY destroy text overlay if everything succeeded!
                             statusText.destroy();
                             subText.destroy();
                             statusBg.destroy();
                             console.log("Loading status overlay elements destroyed.");
+
+                            // Start countdown before beginning gameplay and music
+                            this.startCountdown(ctx);
                         } catch (innerErr) {
                             console.error("Error in decode success callback:", innerErr);
                             statusText.setText('Initialization Error');
@@ -277,9 +276,106 @@ class ScubaFlowScene extends Phaser.Scene {
         }
     }
 
+    startCountdown(ctx) {
+        this.countdownActive = true;
+        this.elapsedTime = 0;
+        this.isPlaying = true; // allow update loop to render the starting scene
+
+        let countdownNumbers = ['3', '2', '1', 'FLOW!'];
+        let colors = ['#bd00ff', '#00f0ff', '#ff007f', '#00ff66'];
+        let index = 0;
+
+        let showNext = () => {
+            if (index < countdownNumbers.length) {
+                let numStr = countdownNumbers[index];
+                let colorHex = colors[index];
+                this.countdownText.setText(numStr);
+                this.countdownText.setColor(colorHex);
+                this.countdownText.setShadow(0, 0, colorHex, 30, true, true);
+                this.countdownText.setStroke(colorHex, 8);
+                this.countdownText.setScale(0.3);
+                this.countdownText.setAlpha(1);
+
+                // Play tick beep using Web Audio API AudioContext directly
+                try {
+                    let osc = ctx.createOscillator();
+                    let gainNode = ctx.createGain();
+                    osc.connect(gainNode);
+                    gainNode.connect(ctx.destination);
+                    osc.type = 'sine';
+                    if (numStr === 'FLOW!') {
+                        osc.frequency.setValueAtTime(440, ctx.currentTime);
+                        osc.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 0.25);
+                        gainNode.gain.setValueAtTime(0.15, ctx.currentTime);
+                        gainNode.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.4);
+                        osc.start();
+                        osc.stop(ctx.currentTime + 0.5);
+                    } else {
+                        osc.frequency.setValueAtTime(523.25, ctx.currentTime); // C5 note
+                        gainNode.gain.setValueAtTime(0.1, ctx.currentTime);
+                        gainNode.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.15);
+                        osc.start();
+                        osc.stop(ctx.currentTime + 0.2);
+                    }
+                } catch (e) {
+                    console.warn("Failed to play countdown beep:", e);
+                }
+
+                this.tweens.add({
+                    targets: this.countdownText,
+                    scale: 1.5,
+                    alpha: { from: 1, to: 0 },
+                    duration: 1000,
+                    ease: 'Cubic.easeOut',
+                    onComplete: () => {
+                        index++;
+                        showNext();
+                    }
+                });
+            } else {
+                this.countdownText.destroy();
+                this.countdownActive = false;
+                console.log("Countdown complete. Starting setupAudioEngine...");
+                this.setupAudioEngine(ctx);
+                console.log("setupAudioEngine completed.");
+            }
+        };
+
+        this.countdownText = this.add.text(600, 350, '', {
+            fontFamily: 'Outfit',
+            fontSize: '140px',
+            fontStyle: 'bold'
+        }).setOrigin(0.5).setDepth(100);
+
+        showNext();
+    }
+
     update(time, delta) {
         try {
             if (!this.isPlaying) return;
+
+            if (this.countdownActive) {
+                this.elapsedTime = 0;
+                this.player.x = 250;
+                this.buddy.x = 550;
+                
+                let buddyStartY = this.getTargetYAtTime((550 / this.baseScrollSpeed) * 1000);
+                this.buddy.y = buddyStartY;
+
+                let playerStartY = this.getTargetYAtTime((250 / this.baseScrollSpeed) * 1000);
+                this.player.y = playerStartY;
+
+                // Redraw visualizers and terrain so everything is visible
+                this.drawParallax(time);
+                this.drawBackgroundVisuals(time);
+                this.drawTerrain();
+                this.drawCaveLights();
+                this.drawPlayerVisuals(time);
+                this.drawBuddyVisuals(time);
+                this.drawForegroundBubbles(delta / 1000);
+                this.drawSiltOverlay();
+                return;
+            }
 
             let prevElapsedTime = this.elapsedTime;
             if (this.musicStartTime !== null && this.audioContext) {
@@ -437,8 +533,8 @@ class ScubaFlowScene extends Phaser.Scene {
             // 3. Simplified Buoyancy Physics
             let lastY = this.player.y;
             if (!this.useAutopilot) {
-                this.buoyancySmooth += (this.V_lung - this.buoyancySmooth) * physDt * 5.2;
-                let ay = (this.buoyancySmooth - 0.5) * -680; // Swifter, more responsive buoyancy acceleration
+                this.buoyancySmooth += (this.V_lung - this.buoyancySmooth) * physDt * 4.8;
+                let ay = (this.buoyancySmooth - 0.5) * -640; // Retuned for balanced, swifter steering with less oversteer
 
                 this.vy += ay * physDt;
                 this.vy *= Math.exp(-this.dragCoeff * physDt);
@@ -496,7 +592,8 @@ class ScubaFlowScene extends Phaser.Scene {
             let collisionTriggered = false;
             let collisionSource = 'floor';
 
-            // Decay grace period
+            // Capture pre-collision vertical velocity to determine impact strength
+            let impactVy = this.vy;
 
             for (let pt of checkPoints) {
                 let wx = px + pt.x;
@@ -528,7 +625,7 @@ class ScubaFlowScene extends Phaser.Scene {
                 let pathCenterY = this.getTargetYAtTime(timeAtPlayer);
                 let pushDir = Math.sign(pathCenterY - this.player.y);
                 this.vy += pushDir * 60;
-                this.triggerPsychedelicSilt(collisionSource);
+                this.triggerPsychedelicSilt(collisionSource, impactVy);
             }
 
             // Continuous silt particle emission when dragging (big sediment clouds, not overwhelming)
@@ -2492,9 +2589,21 @@ class ScubaFlowScene extends Phaser.Scene {
         });
     }
 
-    triggerPsychedelicSilt(source = 'floor') {
+    triggerPsychedelicSilt(source = 'floor', impactVy = 0) {
         this.siltSource = source;
-        this.siltTime = this.siltDuration;
+
+        // Dynamically scale silt-out duration based on impact speed (absolute vy)
+        let impactSpeed = Math.abs(impactVy);
+        let scale = Phaser.Math.Clamp(impactSpeed / 200, 0.44, 1.33); // range: ~0.8s to ~2.4s
+        
+        // Scale duration inversely with level scroll speed to keep blind travel distance consistent
+        let speedFactor = 50 / this.baseScrollSpeed;
+        let currentDuration = this.siltDuration * scale * speedFactor;
+        this.siltTime = currentDuration;
+        this.currentSiltDuration = currentDuration;
+
+        // Shift baseHue complementary (120 degrees) on each bump to dramatically shift the visual color palette
+        this.baseHue = (this.baseHue + 120) % 360;
 
         if (!this.siltActive) {
             this.siltActive = true;
@@ -2542,7 +2651,7 @@ class ScubaFlowScene extends Phaser.Scene {
         if (!this.siltVignetteImage) return;
 
         if (this.siltActive) {
-            let phase = this.siltTime / this.siltDuration;
+            let phase = this.siltTime / (this.currentSiltDuration || this.siltDuration);
 
             let siltHue = (this.baseHue + 180) % 360;
             let colorObj = Phaser.Display.Color.HSLToColor(siltHue / 360, 0.75, 0.25);

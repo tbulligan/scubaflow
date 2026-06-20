@@ -29,11 +29,16 @@ The repository code is the absolute source of truth:
   - The procedural generator computes a 32-bit FNV-1a hash of the track's duration, sample rate, and a 1000-point sample of its channel data.
   - This hash is used as the seed for a custom Mulberry32 PRNG.
   - All randomized generation choices (such as `forceSpawn` cluster patterns and ascending/descending slope directions) use this PRNG instead of the standard unseeded `Math.random()`, guaranteeing that replaying the same audio file produces the identical level layout, collectible density, and maximum potential score every time.
-
 ### Breath Physics & State Machine
 - Vertical motion is simulated using simple buoyancy and drag physics:
   - **buoyancy**: controlled by lung volume $V_{lung} \in [0, 1]$, which increases when the spacebar is held down (inhaling) and decreases when released (exhaling).
   - **drag**: high vertical hydrodynamic drag dampens velocity to create smooth, floaty maneuvers.
+  - **buoyancy tuning**: buoyancy responsiveness coefficient is set to `4.8` and buoyancy vertical acceleration $a_y$ is set to `640` to ensure responsive, enjoyable vertical adjustments while preventing twitchy oversteering.
+
+### Start Countdown Timer
+- To allow players to prepare for the level, a 3-second countdown timer displays "3", "2", "1", "FLOW!" at the start of a level.
+- During this countdown, positions of the player and buddy are frozen at the starting section of the cave, level progression time is paused at `elapsedTime = 0`, and the background/terrain layers are kept fully rendered.
+- Visual ticks are accompanied by procedural audio tone chirps generated via raw `AudioContext` oscillators. Once the countdown completes, the custom audio engine begins and standard gameplay commences.
 
 ### Autopilot & Music Visualizer Mode
 - When Autopilot is toggled in the start menu, vertical buoyancy controls are taken over:
@@ -58,6 +63,8 @@ All gameplay feedback is represented physically and auditorily:
 - **Depth**: Indicated by ambient background HSL color shifts (darkening/shifting colors) and the buddy's depth.
 - **Lung Volume**: Indicated by player sprite chest expansion (ellipse scaling) and breathing audio synth frequencies.
 - **Failure - Silt-Out**: Floor/ceiling collision blinds the player with particle clouds. The player must wait for the silt to clear while staying steady.
+  - **Relative Duration**: Silt-out blindness recovery time is proportional to vertical impact velocity (`impactVy`), scaling between 0.44x and 1.33x of `siltDuration` (~800ms to ~2400ms). Soft scrapes are less punishing than hard vertical bumps. Additionally, the duration scales inversely with `baseScrollSpeed` (using the factor $50/\text{baseScrollSpeed}$) to maintain a consistent horizontal distance traveled while blinded across different level speeds.
+  - **Dynamic Color Shifts**: On each wall collision, `this.baseHue` shifts complementary by 120 degrees, producing a dramatic, dynamic transition of the cave color palette and matched silt particle coloring.
 - **AI Buddy**: Displays helper speech bubbles ("👌?", "👌!") when assisting the player or clearing/recovering from silt. The buddy utilizes a safe (15px margin) and absolute (2px margin/midpoint fallback) terrain-clamping algorithm so they never collide with the walls or raise sediment on their own.
 
 ---
