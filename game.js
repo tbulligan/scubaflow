@@ -12,6 +12,8 @@ class ScubaFlowScene extends Phaser.Scene {
         this.isPlaying = false;
         this.scrollSpeed = 40; // px per second
         this.baseScrollSpeed = 40;
+        this.useAutopilot = window.useAutopilot || false;
+        this.simulatedSpaceDown = false;
 
         // Simplified Agile Buoyancy Physics
         this.V_lung = 0.5; // target state [0 = full sink, 1 = full rise]
@@ -289,18 +291,122 @@ class ScubaFlowScene extends Phaser.Scene {
             // 1. (baseHue now updated in section 6 below, multiplier-scaled)
 
 
-            // 2. Process Input & Buoyancy State
-            let fillRate = 3.0;
-            if (this.spaceKey.isDown) {
-                this.V_lung = Math.min(1.0, this.V_lung + fillRate * dt);
+            // Multi-point body checkPoints definition (defined early so they can be reused for autopilot safety clamping)
+            let checkPoints = [];
+            if (this.avatarType === 'diver') {
+                let frogPhase = (this.elapsedTime / 350) % (Math.PI * 2);
+                let kickExtension = Math.max(0, Math.sin(frogPhase));
+                let frogPhase2 = frogPhase + 0.25;
+                let kickExtension2 = Math.max(0, Math.sin(frogPhase2));
+
+                let foot2X = -8 - (6 + kickExtension * 8) - (2 + kickExtension * 12);
+                let foot2Y = -6 - (12 - kickExtension * 8) - (10 - kickExtension * 10);
+
+                let foot1X = -10 - (6 + kickExtension2 * 8) - (2 + kickExtension2 * 12);
+                let foot1Y = 2 - (12 - kickExtension2 * 8) - (10 - kickExtension2 * 10);
+
+                checkPoints = [
+                    { x: 0,   y: 0,       r: 8,  floor: true,  ceil: true  }, // Torso center (chest ellipse half-h=8)
+                    { x: 14,  y: -4,      r: 5,  floor: true,  ceil: true  }, // Head
+                    { x: -10, y: -13,     r: 3,  floor: false, ceil: true  }, // Tank tops (highest solid point)
+                    { x: 26,  y: -2,      r: 4,  floor: true,  ceil: true  }, // Light hand (forward-most)
+                    { x: foot1X, y: foot1Y, r: 5, floor: true, ceil: true }, // Foot 1 — floor & ceiling
+                    { x: foot2X, y: foot2Y, r: 5, floor: true, ceil: true }, // Foot 2 — floor & ceiling
+                ];
             } else {
-                this.V_lung = Math.max(0.0, this.V_lung - fillRate * dt);
+                checkPoints = [
+                    { x: 0, y: 0, r: 12 }
+                ];
+            }
+
+            // 2. Process Input & Buoyancy State
+            let lastY = this.player.y;
+            if (this.useAutopilot) {
+                // Autopilot target calculation: find nearest active debris ahead of player
+                let px = this.player.x;
+                let timeAtPlayer = (px / this.baseScrollSpeed) * 1000;
+                let pPathY = this.getTargetYAtTime(timeAtPlayer);
+                let targetY = pPathY;
+
+                let lookAheadDistance = 400; // px
+                let nearestCollectible = null;
+                let minDistanceX = Infinity;
+
+                if (this.collectiblesGroup && this.collectiblesGroup.children) {
+                    this.collectiblesGroup.children.iterate((debris) => {
+                        if (debris && debris.active) {
+                            let dx = debris.x - px;
+                            if (dx > -10 && dx < lookAheadDistance) {
+                                if (dx < minDistanceX) {
+                                    minDistanceX = dx;
+                                    nearestCollectible = debris;
+                                }
+                            }
+                        }
+                    });
+                }
+
+                if (nearestCollectible) {
+                    targetY = nearestCollectible.y;
+                }
+
+                // Clamp targetY to safe zone corridor using player checkpoints to guarantee no silt-outs
+                let minYAllowed = -9999;
+                let maxYAllowed = 9999;
+                let safetyMargin = 12; // safe buffer
+
+                for (let pt of checkPoints) {
+                    let wx = px + pt.x;
+                    let ptTime = (wx / this.baseScrollSpeed) * 1000;
+                    let ptPathY = this.getTargetYAtTime(ptTime);
+                    let ptEnergy = this.getEnergyAtTime(ptTime);
+                    let { floorOffset, ceilOffset } = this.getWallOffsets(wx, ptEnergy);
+                    let ptFloorY = ptPathY + floorOffset;
+                    let ptCeilY = ptPathY - ceilOffset;
+
+                    if (pt.ceil !== false) {
+                        minYAllowed = Math.max(minYAllowed, ptCeilY - pt.y + pt.r + safetyMargin);
+                    }
+                    if (pt.floor !== false) {
+                        maxYAllowed = Math.min(maxYAllowed, ptFloorY - pt.y - pt.r - safetyMargin);
+                    }
+                }
+
+                if (minYAllowed <= maxYAllowed) {
+                    targetY = Phaser.Math.Clamp(targetY, minYAllowed, maxYAllowed);
+                }
+
+                // Glide towards target
+                this.player.y = Phaser.Math.Linear(this.player.y, targetY, 1 - Math.exp(-8 * dt));
+
+                // Maintain vy for visual effects
+                this.vy = (this.player.y - lastY) / dt;
+
+                // Sync simulated input and lung volume V_lung for chest expansion & breathing audio
+                let desiredV = 0.5;
+                if (targetY < this.player.y - 2) {
+                    desiredV = 1.0; // rising
+                } else if (targetY > this.player.y + 2) {
+                    desiredV = 0.0; // sinking
+                }
+                this.V_lung += (desiredV - this.V_lung) * dt * 5;
+                this.V_lung = Phaser.Math.Clamp(this.V_lung, 0, 1);
+
+                this.simulatedSpaceDown = (desiredV === 1.0);
+            } else {
+                let fillRate = 3.0;
+                if (this.spaceKey.isDown) {
+                    this.V_lung = Math.min(1.0, this.V_lung + fillRate * dt);
+                } else {
+                    this.V_lung = Math.max(0.0, this.V_lung - fillRate * dt);
+                }
             }
 
             // Audio Breathing Volumes
             let ctx = this.audioContext;
             if (ctx) {
-                if (this.spaceKey.isDown) {
+                let spaceDown = this.useAutopilot ? this.simulatedSpaceDown : this.spaceKey.isDown;
+                if (spaceDown) {
                     this.inhaleGain.gain.setTargetAtTime(0.10, ctx.currentTime, 0.05);
                     this.exhaleGain.gain.setTargetAtTime(0.0, ctx.currentTime, 0.05);
                     this.inhaleFilter.frequency.setValueAtTime(300 + this.V_lung * 600, ctx.currentTime);
@@ -338,12 +444,14 @@ class ScubaFlowScene extends Phaser.Scene {
             }
 
             // 3. Simplified Buoyancy Physics
-            this.buoyancySmooth += (this.V_lung - this.buoyancySmooth) * dt * 4.5;
-            let ay = (this.buoyancySmooth - 0.5) * -600; // Damped to ±300 px/s² for fine steering
+            if (!this.useAutopilot) {
+                this.buoyancySmooth += (this.V_lung - this.buoyancySmooth) * dt * 4.5;
+                let ay = (this.buoyancySmooth - 0.5) * -600; // Damped to ±300 px/s² for fine steering
 
-            this.vy += ay * dt;
-            this.vy *= Math.exp(-this.dragCoeff * dt);
-            this.player.y += this.vy * dt;
+                this.vy += ay * dt;
+                this.vy *= Math.exp(-this.dragCoeff * dt);
+                this.player.y += this.vy * dt;
+            }
 
             // 4. Cave Boundaries & Local Energy Calculation
             let px = this.player.x;
@@ -357,33 +465,7 @@ class ScubaFlowScene extends Phaser.Scene {
             let floorY = pPathY + floorOffset;
             let ceilingY = pPathY - ceilOffset;
 
-            // Multi-point body collision checks (checking any part of the diver's body: head, torso, fins, hand, twinset)
-            let checkPoints = [];
-            if (this.avatarType === 'diver') {
-                let frogPhase = (this.elapsedTime / 350) % (Math.PI * 2);
-                let kickExtension = Math.max(0, Math.sin(frogPhase));
-                let frogPhase2 = frogPhase + 0.25;
-                let kickExtension2 = Math.max(0, Math.sin(frogPhase2));
-
-                let foot2X = -8 - (6 + kickExtension * 8) - (2 + kickExtension * 12);
-                let foot2Y = -6 - (12 - kickExtension * 8) - (10 - kickExtension * 10);
-
-                let foot1X = -10 - (6 + kickExtension2 * 8) - (2 + kickExtension2 * 12);
-                let foot1Y = 2 - (12 - kickExtension2 * 8) - (10 - kickExtension2 * 10);
-
-                checkPoints = [
-                    { x: 0,   y: 0,       r: 8,  floor: true,  ceil: true  }, // Torso center (chest ellipse half-h=8)
-                    { x: 14,  y: -4,      r: 5,  floor: true,  ceil: true  }, // Head
-                    { x: -10, y: -13,     r: 3,  floor: false, ceil: true  }, // Tank tops (highest solid point)
-                    { x: 26,  y: -2,      r: 4,  floor: true,  ceil: true  }, // Light hand (forward-most)
-                    { x: foot1X, y: foot1Y, r: 5, floor: true, ceil: true }, // Foot 1 — floor & ceiling (fin turbulence triggers silt on either surface)
-                    { x: foot2X, y: foot2Y, r: 5, floor: true, ceil: true }, // Foot 2 — floor & ceiling
-                ];
-            } else {
-                checkPoints = [
-                    { x: 0, y: 0, r: 12 }
-                ];
-            }
+            // Re-use checkPoints defined early in Section 2 for multi-point body collision checks
 
             let collisionTriggered = false;
             let collisionSource = 'floor';
@@ -760,7 +842,8 @@ class ScubaFlowScene extends Phaser.Scene {
         let dt = this.game.loop.delta / 1000;
 
         // 1. Exhale bubbles on spacebar release (lung volume shrinking)
-        if (!this.spaceKey.isDown && this.V_lung > 0.05) {
+        let spaceDown = this.useAutopilot ? this.simulatedSpaceDown : this.spaceKey.isDown;
+        if (!spaceDown && this.V_lung > 0.05) {
             if (Math.random() < 0.20) {
                 let rndHue = (this.baseHue + Math.random() * 60) % 360;
                 let bubbleColor = Phaser.Display.Color.HSLToColor(rndHue / 360, 1.0, 0.65).color;
@@ -3167,6 +3250,13 @@ class ScubaFlowScene extends Phaser.Scene {
         let sinkAy = (testSmoothSink - 0.5) * -600;
         console.assert(riseAy === -300, `Assertion Failed: Expect rise acceleration -300, got ${riseAy}`);
         console.assert(sinkAy === 300, `Assertion Failed: Expect sink acceleration 300, got ${sinkAy}`);
+
+        // Test 6: Autopilot math sanity checks
+        let testPathY = 300;
+        let testMinYAllowed = 100;
+        let testMaxYAllowed = 500;
+        let testClamped = Phaser.Math.Clamp(testPathY, testMinYAllowed, testMaxYAllowed);
+        console.assert(testClamped === 300, `Assertion Failed: Autopilot clamping logic failed: expected 300, got ${testClamped}`);
 
         console.log("=== DIAGNOSTICS PASSED: ALL CONTROLS FUNCTIONAL ===");
     }

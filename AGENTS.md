@@ -31,6 +31,12 @@ The repository code is the absolute source of truth:
   - **buoyancy**: controlled by lung volume $V_{lung} \in [0, 1]$, which increases when the spacebar is held down (inhaling) and decreases when released (exhaling).
   - **drag**: high vertical hydrodynamic drag dampens velocity to create smooth, floaty maneuvers.
 
+### Autopilot & Music Visualizer Mode
+- When Autopilot is toggled in the start menu, vertical buoyancy controls are taken over:
+  - **Targeting**: The system looks ahead up to $400\text{px}$ for the nearest active neon debris. If no debris is nearby, it defaults to the center of the cave path.
+  - **Safety Clamping**: To prevent silt-outs, the target coordinate is dynamically clamped against all multi-point player shape checkpoints with a safe $12\text{px}$ clearance buffer from the cave ceiling and floor.
+  - **Visual & Audio Sync**: The player glides smoothly to the target using exponential linear interpolation. To preserve the zero-HUD diegetic feel, the simulated input drives $V_{lung}$ physics, chest expansion scaling, bubble release, and breathing synth frequencies.
+
 ### Slope Clearance & Collision Navigability
 - To prevent impossible collisions where steep slopes narrow the corridor below the clearance of the player's horizontally extended $64\text{px}$ shape (fins to outstretched arm):
   - The game dynamically samples the local corridor slope $S = dy/dx$ from the path center generator.
@@ -67,3 +73,12 @@ To run the game locally:
 2. Enable GitHub Pages in your GitHub Repository Settings under **Settings -> Pages**:
    - Under **Build and deployment -> Source**, select **Deploy from a branch**.
    - Under **Branch**, select `main` (folder `/root`) and click **Save**.
+
+---
+
+## 4. Verification & Testing Guidelines
+
+### Skipping Agentic Browsing
+- To conserve token usage and maintain execution efficiency, agents MUST NOT run automated agentic browser subagents for visual or gameplay testing.
+- Rely on built-in diagnostic self-tests and request human feedback for manual gameplay/UI verification.
+
