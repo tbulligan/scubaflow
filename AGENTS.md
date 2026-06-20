@@ -38,7 +38,7 @@ The repository code is the absolute source of truth:
 ### Start Countdown Timer
 - To allow players to prepare for the level, a 3-second countdown timer displays "3", "2", "1", "FLOW!" at the start of a level.
 - During this countdown, positions of the player and buddy are frozen at the starting section of the cave, level progression time is paused at `elapsedTime = 0`, and the background/terrain layers are kept fully rendered.
-- **Flat Starting Zone:** The level generator enforces a flat, wide 15-second starting zone (`introDuration = 15000` ms) on the centerline (Y=250) of the cave. Both the player (spawned at `x = 250`) and buddy (spawned at `x = 550`) are guaranteed to spawn safely without wall collision, and collectibles are blocked from spawning before `17000` ms to ensure they are never out of reach at spawn.
+- **Flat Starting Zone:** The level generator enforces a flat, wide 3-second starting zone (`introDuration = 3000` ms) on the centerline (Y=250) of the cave. Both the player (spawned at `x = 250`) and buddy (spawned at `x = 550`) are guaranteed to spawn safely without wall collision, and collectibles are blocked from spawning before `3000` ms to ensure they are never out of reach at spawn.
 - Visual ticks are accompanied by procedural audio tone chirps generated via raw `AudioContext` oscillators. Once the countdown completes, the custom audio engine begins and standard gameplay commences.
 
 ### Autopilot & Music Visualizer Mode
