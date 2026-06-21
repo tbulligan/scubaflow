@@ -2352,7 +2352,7 @@ class ScubaFlowScene extends Phaser.Scene {
                     let ventAlpha = 0.06 + (mult - 1) * 0.02;    // x1: 0.06, x8: 0.20
                     let emitChance = 0.06 + (mult - 1) * 0.02;    // x1: 0.06, x8: 0.20
                     
-                    if (Math.random() < emitChance) {
+                    if (!this.countdownActive && Math.random() < emitChance) {
                         this.plumeEmitter.particleTint = plumeColor;
                         this.plumeEmitter.emitParticleAt(cx, floorY, 1, {
                             scale: { start: ventScaleStart, end: ventScaleEnd },
