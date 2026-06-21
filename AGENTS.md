@@ -19,10 +19,35 @@ The repository code is the absolute source of truth:
 - [.agents/ponytail.md](file:///home/tomaso/projects/scubaflow/.agents/ponytail.md): Defines the Ponytail Philosophy.
 
 ### Architectural & Development Philosophy
-All changes, architectures, and updates MUST strictly comply with the **Ponytail Philosophy** defined in [.agents/ponytail.md](file:///home/tomaso/projects/scubaflow/.agents/ponytail.md):
-- **YAGNI (You Aren't Gonna Need It):** Build only features that are explicitly requested. Keep the code simple, concrete, and delete unused or boilerplate logic immediately.
-- **Fewest Files & No Bloat:** Maintain a flat, client-side static-only repository structure. Choose native platform capabilities or standard API features over external frameworks or dependencies.
-- **Assert-Based Testing:** Non-trivial logic must leave behind exactly one runnable check in `runSelfTests()` inside [game.js](file:///home/tomaso/projects/scubaflow/game.js). Heavy testing frameworks or fixtures are prohibited.
+All changes, architectures, and updates MUST strictly comply with the **Ponytail Philosophy** defined in [.agents/ponytail.md](file:///home/tomaso/projects/scubaflow/.agents/ponytail.md).
+
+#### The 6-Step Decision Tree (Stop at the first rung that holds):
+1. **Does this need to be built at all? (YAGNI)**
+2. **Does the standard library already do this?** Use it.
+3. **Does a native platform feature cover it?** Use it.
+4. **Does an already-installed dependency solve it?** Use it.
+5. **Can this be one line?** Make it one line.
+6. **Only then: write the minimum code that works.**
+
+#### Core Rules:
+- **No Abstractions:** Avoid any abstractions that weren't explicitly requested.
+- **No New Dependencies:** Do not introduce new dependencies if it can be avoided.
+- **No Boilerplate:** Omit any boilerplate code that nobody asked for.
+- **Deletion over Addition:** Prefer deletion over addition, boring over clever, and the fewest files possible.
+- **Question Complexity:** Actively question complex requests (e.g., "Do you actually need X, or does Y cover it?").
+- **Edge-Case Correctness:** Pick the edge-case-correct option when two standard library approaches are the same size. Lazy means less code, not a flimsier algorithm.
+- **Document Limitations:** If you introduce a shortcut or temporary simplification with a known ceiling (e.g., global lock, $O(n^2)$ search, naive heuristic), document the limitation and upgrade path using a standard `TODO:` or `WARNING:` comment.
+
+#### What to NEVER be lazy about:
+- Input validation at trust boundaries.
+- Error handling that prevents data loss.
+- Security and accessibility.
+- The calibration real hardware needs (since the platform is never the spec ideal; e.g., clock drift, sensor off-reads).
+- Anything explicitly requested.
+
+#### Assert-Based Testing:
+- Non-trivial logic must leave behind exactly one runnable check in `runSelfTests()` inside [game.js](file:///home/tomaso/projects/scubaflow/game.js)—the smallest thing that fails if the logic breaks. Heavy testing frameworks or fixtures are prohibited. Trivial one-liners need no tests.
+
 
 ---
 
