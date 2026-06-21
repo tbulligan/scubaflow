@@ -254,13 +254,13 @@
         /* Autopilot Switch Styles */
         .switch-container {
             display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 12px;
-            margin-bottom: 20px;
+            flex-direction: column;
+            align-items: stretch;
+            gap: 10px;
+            margin-bottom: 28px;
             background: rgba(255, 255, 255, 0.02);
-            padding: 10px 16px;
-            border-radius: 12px;
+            padding: 14px 18px;
+            border-radius: 16px;
             border: 1px solid rgba(0, 240, 255, 0.15);
             transition: all 0.3s ease;
         }
@@ -278,6 +278,16 @@
             color: #cbd5e1;
             cursor: pointer;
             text-transform: uppercase;
+        }
+
+        .switch-hint {
+            font-size: 0.72rem;
+            color: #94a3b8;
+            opacity: 0.8;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            text-align: left;
+            line-height: 1.4;
         }
 
         .toggle-switch {
@@ -475,14 +485,16 @@
                 
                 <!-- Autopilot / Music Visualizer Switch -->
                 <div class="switch-container">
-                    <span class="switch-label" id="autopilot-label">Autopilot (Music Visualizer Mode)</span>
-                    <label class="toggle-switch" aria-labelledby="autopilot-label">
-                        <input type="checkbox" id="autopilot-checkbox">
-                        <span class="slider"></span>
-                    </label>
-                </div>
-                <div class="switch-hint">
-                    Mutes game sounds to focus purely on your music track
+                    <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px;">
+                        <span class="switch-label" id="autopilot-label">Autopilot (Music Visualizer Mode)</span>
+                        <label class="toggle-switch" aria-labelledby="autopilot-label">
+                            <input type="checkbox" id="autopilot-checkbox">
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+                    <div class="switch-hint">
+                        Mutes game sounds to focus purely on your music track
+                    </div>
                 </div>
 
                 <button id="btn-dive" class="btn-dive" type="button" disabled style="opacity: 0.5; pointer-events: none;">Select a Music Track</button>
