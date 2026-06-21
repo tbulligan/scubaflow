@@ -2353,8 +2353,8 @@ class ScubaFlowScene extends Phaser.Scene {
                     let emitChance = 0.06 + (mult - 1) * 0.02;    // x1: 0.06, x8: 0.20
                     
                     if (Math.random() < emitChance) {
+                        this.plumeEmitter.particleTint = plumeColor;
                         this.plumeEmitter.emitParticleAt(cx, floorY, 1, {
-                            tint: plumeColor,
                             scale: { start: ventScaleStart, end: ventScaleEnd },
                             alpha: { start: Math.min(0.9, ventAlpha * 5.5), end: 0 }, // 5.5x multiplier for visibility
                             lifespan: { min: 1800, max: 2800 },
@@ -2803,8 +2803,12 @@ class ScubaFlowScene extends Phaser.Scene {
     }
 
     triggerMaxFlowPulse() {
-        // Camera flash & thump
-        this.cameras.main.flash(350, 0, 240, 255, 0.08);
+        let flowHue = (this.baseHue + 120) % 360;
+        let colorObj = Phaser.Display.Color.HSLToColor(flowHue / 360, 1.0, 0.6);
+
+        // Camera flash & thump (color-matched to flowHue, with subtle screenshake)
+        this.cameras.main.flash(350, colorObj.r, colorObj.g, colorObj.b, 0.12);
+        this.cameras.main.shake(150, 0.005);
 
         let px = this.player.x;
         let py = this.player.y;
@@ -2819,8 +2823,7 @@ class ScubaFlowScene extends Phaser.Scene {
             emitting: false
         });
 
-        let flowHue = (this.baseHue + 120) % 360;
-        ring.particleTint = Phaser.Display.Color.HSLToColor(flowHue / 360, 1.0, 0.6).color;
+        ring.particleTint = colorObj.color;
         ring.explode();
 
         this.time.delayedCall(1200, () => ring.destroy());
