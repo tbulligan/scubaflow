@@ -240,28 +240,43 @@ class ScubaFlowScene extends Phaser.Scene {
         if (window.customAudioBuffer) {
             this.isPlaying = false;
 
-            // Add background box for loader contrast
+            // SOTA Loader: Full-screen overlay with a pulsing sonar ring
             let statusBg = this.add.graphics();
-            statusBg.fillStyle(0x020514, 0.85);
-            statusBg.fillRoundedRect(400, 275, 400, 150, 16);
-            statusBg.lineStyle(2, 0x00f0ff, 0.4);
-            statusBg.strokeRoundedRect(400, 275, 400, 150, 16);
+            statusBg.fillStyle(0x020514, 0.95);
+            statusBg.fillRect(0, 0, 1200, 700);
 
-            let statusText = this.add.text(600, 330, 'Decoding Custom Track...', {
+            let sonarRing = this.add.graphics();
+            let loaderProgress = { val: 0 };
+            let loaderTween = this.tweens.add({
+                targets: loaderProgress,
+                val: 1,
+                duration: 1600,
+                repeat: -1,
+                onUpdate: () => {
+                    sonarRing.clear();
+                    sonarRing.lineStyle(2, 0x00f0ff, 1.0 - loaderProgress.val);
+                    sonarRing.strokeCircle(600, 300, 15 + loaderProgress.val * 65);
+                }
+            });
+
+            let statusText = this.add.text(600, 390, 'DECODING CUSTOM TRACK', {
                 fontFamily: 'Outfit',
-                fontSize: '24px',
+                fontSize: '18px',
                 color: '#00f0ff',
+                letterSpacing: 2,
                 fontStyle: 'bold'
             }).setOrigin(0.5);
 
-            let subText = this.add.text(600, 370, 'Please wait a moment', {
+            let subText = this.add.text(600, 420, 'Analyzing waveform & generating cave system', {
                 fontFamily: 'Montserrat',
-                fontSize: '14px',
-                color: '#94a3b8'
+                fontSize: '12px',
+                color: '#64748b',
+                letterSpacing: 1
             }).setOrigin(0.5);
 
             statusText.setDepth(100);
             subText.setDepth(100);
+            sonarRing.setDepth(100);
             statusBg.setDepth(99);
 
             try {
@@ -328,6 +343,8 @@ class ScubaFlowScene extends Phaser.Scene {
                             this.marineSnowGraphics = this.add.graphics().setDepth(-1.5).setScrollFactor(0);
 
                             // ONLY destroy text overlay if everything succeeded!
+                            if (loaderTween) loaderTween.stop();
+                            if (sonarRing) sonarRing.destroy();
                             statusText.destroy();
                             subText.destroy();
                             statusBg.destroy();
@@ -337,11 +354,15 @@ class ScubaFlowScene extends Phaser.Scene {
                             this.startCountdown(ctx);
                         } catch (innerErr) {
                             console.error("Error in decode success callback:", innerErr);
+                            if (loaderTween) loaderTween.stop();
+                            if (sonarRing) sonarRing.destroy();
                             statusText.setText('Initialization Error');
                             subText.setText(innerErr.stack || innerErr.message);
                         }
                     }, (err) => {
                         console.error("Error decoding audio data:", err);
+                        if (loaderTween) loaderTween.stop();
+                        if (sonarRing) sonarRing.destroy();
                         statusText.setText('Failed to decode track.');
                         subText.setText(err ? (err.message || String(err)) : 'Unknown decoding error');
                     });
@@ -911,12 +932,11 @@ class ScubaFlowScene extends Phaser.Scene {
             // Update WebGL PostFX shader parameters (Chromatic Split)
             let fx = this.cameras.main.getPostPipeline(PsychedelicFX);
             if (fx) {
-                // Chromatic split decays in sync with silt time, and scales with multiplier
+                // Chromatic split decays in sync with silt time
                 let siltOffset = (this.siltActive && this.currentSiltDuration > 0)
                     ? (fx.chromaticOffsetStart || 0.02) * Math.max(0, this.siltTime / this.currentSiltDuration)
                     : 0;
-                let flowOffset = (this.scoreMultiplier - 1) * 0.0012; // amplify flow/speed at high multipliers
-                fx.chromaticOffset = siltOffset + flowOffset;
+                fx.chromaticOffset = siltOffset;
             }
             // Score multiplier logic (avoiding silt-outs increases multiplier dynamically)
             if (!this.siltActive) {
@@ -2860,7 +2880,9 @@ class ScubaFlowScene extends Phaser.Scene {
         if (this.time.now - (this.lastHeavySilt || 0) > 800) {
             this.lastHeavySilt = this.time.now;
             
-            // Set chromatic split offset proportional to impactVy instead of screenshake
+            // Trigger dynamic screen shake and chromatic split proportional to impactVy
+            this.cameras.main.shake(200, Math.min(0.012, 0.003 + (impactSpeed / 150) * 0.008));
+
             let fx = this.cameras.main.getPostPipeline(PsychedelicFX);
             if (fx) {
                 let offsetStart = Math.min(0.02, 0.003 + (impactSpeed / 100) * 0.006);
