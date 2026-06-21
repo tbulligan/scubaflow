@@ -1327,27 +1327,40 @@ class ScubaFlowScene extends Phaser.Scene {
             fg.fillStyle(farColor, Math.max(farAlpha * 0.4, farAlpha * flowFill * 0.6));
             fg.lineStyle(1.0, farColor, farAlpha * 0.8);
 
+            let stagW = Math.max(6, hw * 1.3 + Math.sin(i * 2.9) * 4);
+
             // Occasional cave columns representing fused stalactites/stalagmites (flared hourglass)
             let isColumn = (Math.abs(i) % 6 === 0);
             if (isColumn) {
-                let colW = Math.max(4, hw * 0.6);
-                fg.fillRect(sx - colW, stalCeil - 60, colW * 2, (stalCeilFloor + 60) - (stalCeil - 60));
-                fg.strokeRect(sx - colW, stalCeil - 60, colW * 2, (stalCeilFloor + 60) - (stalCeil - 60));
+                let midW = Math.max(3, hw * 0.45);
+                let baseCeilW = hw * 1.3;
+                let baseFloorW = stagW * 1.3;
+                let midY = stalCeil + (stalCeilFloor - stalCeil) * 0.45;
+
+                fg.beginPath();
+                fg.moveTo(sx - baseCeilW, stalCeil - 60);
+                fg.lineTo(sx + baseCeilW, stalCeil - 60);
+                fg.lineTo(sx + midW, midY);
+                fg.lineTo(sx + baseFloorW, stalCeilFloor + 60);
+                fg.lineTo(sx - baseFloorW, stalCeilFloor + 60);
+                fg.lineTo(sx - midW, midY);
+                fg.closePath();
+                fg.fillPath();
+                fg.strokePath();
+            } else {
+                // Stalactite
+                fg.beginPath();
+                fg.moveTo(sx - hw, stalCeil - 60); fg.lineTo(sx + hw, stalCeil - 60); fg.lineTo(sx, stalCeil + stalH); fg.closePath();
+                fg.fillPath(); fg.strokePath();
+
+                // Stalagmite (drawn as an organic upward-pointing triangle)
+                fg.beginPath();
+                fg.moveTo(sx - stagW, stalCeilFloor + 60);
+                fg.lineTo(sx + stagW, stalCeilFloor + 60);
+                fg.lineTo(sx, stalCeilFloor - stagH);
+                fg.closePath();
+                fg.fillPath(); fg.strokePath();
             }
-
-            // Stalactite
-            fg.beginPath();
-            fg.moveTo(sx - hw, stalCeil - 60); fg.lineTo(sx + hw, stalCeil - 60); fg.lineTo(sx, stalCeil + stalH); fg.closePath();
-            fg.fillPath(); fg.strokePath();
-
-            // Stalagmite (drawn as an organic upward-pointing triangle)
-            let stagW = Math.max(6, hw * 1.3 + Math.sin(i * 2.9) * 4);
-            fg.beginPath();
-            fg.moveTo(sx - stagW, stalCeilFloor + 60);
-            fg.lineTo(sx + stagW, stalCeilFloor + 60);
-            fg.lineTo(sx, stalCeilFloor - stagH);
-            fg.closePath();
-            fg.fillPath(); fg.strokePath();
         }
 
         // --- NEAR layer (40% relative speed) ---
@@ -1423,28 +1436,41 @@ class ScubaFlowScene extends Phaser.Scene {
             // Fill alpha driven by flow level — 0 = wireframe, 1 = solid neon
             ng.fillStyle(nearColor, Math.max(nearStrokeAlpha * 0.35, nearStrokeAlpha * flowFill * 0.75));
 
+            let stagW = Math.max(8, hw * 1.3 + Math.sin(i * 3.1) * 5);
+
             // Occasional cave columns representing fused stalactites/stalagmites (flared hourglass)
             let isColumn = (Math.abs(i) % 5 === 0);
             if (isColumn) {
-                let colW = Math.max(6, hw * 0.6);
-                ng.fillRect(sx - colW, nearCeil - 80, colW * 2, (nearFloor + 80) - (nearCeil - 80));
-                ng.strokeRect(sx - colW, nearCeil - 80, colW * 2, (nearFloor + 80) - (nearCeil - 80));
+                let midW = Math.max(5, hw * 0.45);
+                let baseCeilW = hw * 1.3;
+                let baseFloorW = stagW * 1.3;
+                let midY = nearCeil + (nearFloor - nearCeil) * 0.45;
+
+                ng.beginPath();
+                ng.moveTo(sx - baseCeilW, nearCeil - 80);
+                ng.lineTo(sx + baseCeilW, nearCeil - 80);
+                ng.lineTo(sx + midW, midY);
+                ng.lineTo(sx + baseFloorW, nearFloor + 80);
+                ng.lineTo(sx - baseFloorW, nearFloor + 80);
+                ng.lineTo(sx - midW, midY);
+                ng.closePath();
+                ng.fillPath();
+                ng.strokePath();
+            } else {
+                // Stalactite
+                ng.beginPath();
+                ng.moveTo(sx - hw, nearCeil - 80); ng.lineTo(sx + hw, nearCeil - 80); ng.lineTo(sx, nearCeil + stalH);
+                ng.closePath();
+                ng.fillPath(); ng.strokePath();
+
+                // Stalagmite (drawn as an organic upward-pointing triangle)
+                ng.beginPath();
+                ng.moveTo(sx - stagW, nearFloor + 80);
+                ng.lineTo(sx + stagW, nearFloor + 80);
+                ng.lineTo(sx, nearFloor - stagH);
+                ng.closePath();
+                ng.fillPath(); ng.strokePath();
             }
-
-            // Stalactite
-            ng.beginPath();
-            ng.moveTo(sx - hw, nearCeil - 80); ng.lineTo(sx + hw, nearCeil - 80); ng.lineTo(sx, nearCeil + stalH);
-            ng.closePath();
-            ng.fillPath(); ng.strokePath();
-
-            // Stalagmite (drawn as an organic upward-pointing triangle)
-            let stagW = Math.max(8, hw * 1.3 + Math.sin(i * 3.1) * 5);
-            ng.beginPath();
-            ng.moveTo(sx - stagW, nearFloor + 80);
-            ng.lineTo(sx + stagW, nearFloor + 80);
-            ng.lineTo(sx, nearFloor - stagH);
-            ng.closePath();
-            ng.fillPath(); ng.strokePath();
         }
     }
 
