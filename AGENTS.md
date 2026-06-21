@@ -18,6 +18,12 @@ The repository code is the absolute source of truth:
 - [LICENSE](file:///home/tomaso/projects/scubaflow/LICENSE): Open-source license file pointing to tomaso.bulligan.com.
 - [.agents/ponytail.md](file:///home/tomaso/projects/scubaflow/.agents/ponytail.md): Defines the Ponytail Philosophy.
 
+### Architectural & Development Philosophy
+All changes, architectures, and updates MUST strictly comply with the **Ponytail Philosophy** defined in [.agents/ponytail.md](file:///home/tomaso/projects/scubaflow/.agents/ponytail.md):
+- **YAGNI (You Aren't Gonna Need It):** Build only features that are explicitly requested. Keep the code simple, concrete, and delete unused or boilerplate logic immediately.
+- **Fewest Files & No Bloat:** Maintain a flat, client-side static-only repository structure. Choose native platform capabilities or standard API features over external frameworks or dependencies.
+- **Assert-Based Testing:** Non-trivial logic must leave behind exactly one runnable check in `runSelfTests()` inside [game.js](file:///home/tomaso/projects/scubaflow/game.js). Heavy testing frameworks or fixtures are prohibited.
+
 ---
 
 ## 2. Core Game Architecture & Systems
