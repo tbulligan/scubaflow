@@ -1256,8 +1256,8 @@ class ScubaFlowScene extends Phaser.Scene {
         fg.clear();
         let farHue = (this.baseHue + 200) % 360;
         // Far layer: noticeably dimmer luminosity and capped alpha
-        let farLum = Math.max(0.05, baseLum - 0.12);
-        let farAlpha = baseAlpha * 0.45; // clearly fainter than near
+        let farLum = Math.max(0.03, baseLum - 0.18);
+        let farAlpha = baseAlpha * 0.28; // clearly fainter than near
         let farColor = this.hslToColorInt(farHue / 360, baseSat * 0.8, farLum);
         fg.lineStyle(1.0, farColor, farAlpha);
 
@@ -1269,8 +1269,8 @@ class ScubaFlowScene extends Phaser.Scene {
 
         // Solid far-layer rock: continuous ceiling and floor bands behind stalactites/stalagmites
         // Ceiling band: fill from screen top to cave ceiling profile
-        fg.fillStyle(farColor, farAlpha * 0.55 + flowFill * 0.25);
-        fg.lineStyle(1.0, farColor, farAlpha * 0.7);
+        fg.fillStyle(farColor, farAlpha * 0.45 + flowFill * 0.15);
+        fg.lineStyle(1.0, farColor, farAlpha * 0.5);
         {
             let bStep = 60;
             let bCount = Math.ceil(screenW / bStep) + 2;
@@ -1278,7 +1278,7 @@ class ScubaFlowScene extends Phaser.Scene {
             let bFirst = true;
             for (let nb = -1; nb <= bCount; nb++) {
                 let bsx = nb * bStep - (camX * farFactor) % bStep;
-                let bwx = bsx + camX;
+                let bwx = bsx + camX * farFactor;
                 let bc = getCaveCeilY(bwx);
                 if (bFirst) { fg.moveTo(bsx, -50); fg.lineTo(bsx, bc); bFirst = false; }
                 else { fg.lineTo(bsx, bc); }
@@ -1295,7 +1295,7 @@ class ScubaFlowScene extends Phaser.Scene {
             bFirst = true;
             for (let nb = -1; nb <= bCount; nb++) {
                 let bsx = nb * bStep - (camX * farFactor) % bStep;
-                let bwx = bsx + camX;
+                let bwx = bsx + camX * farFactor;
                 let bf = getCaveFloorY(bwx);
                 if (bFirst) { fg.moveTo(bsx, 750); fg.lineTo(bsx, bf); bFirst = false; }
                 else { fg.lineTo(bsx, bf); }
@@ -1314,7 +1314,7 @@ class ScubaFlowScene extends Phaser.Scene {
             sx += Math.sin(i * 7.3) * 50;
 
             // Each shape anchors to its own x for correct cave profile
-            let worldX = sx + camX;
+            let worldX = sx + camX * farFactor;
             let stalCeilFloor = getCaveFloorY(worldX);
             let stalCeil = getCaveCeilY(worldX);
             let channelH = stalCeilFloor - stalCeil;
@@ -1324,18 +1324,30 @@ class ScubaFlowScene extends Phaser.Scene {
             let hw = 10 + Math.sin(i * 3.7) * 5;
 
             // Fill alpha driven by flow level — 0 = wireframe, 1 = solid
-            fg.fillStyle(farColor, Math.max(farAlpha * 0.6, farAlpha * flowFill));
-            fg.lineStyle(1.0, farColor, farAlpha);
+            fg.fillStyle(farColor, Math.max(farAlpha * 0.4, farAlpha * flowFill * 0.6));
+            fg.lineStyle(1.0, farColor, farAlpha * 0.8);
+
+            // Occasional cave columns representing fused stalactites/stalagmites (flared hourglass)
+            let isColumn = (Math.abs(i) % 6 === 0);
+            if (isColumn) {
+                let colW = Math.max(4, hw * 0.6);
+                fg.fillRect(sx - colW, stalCeil - 60, colW * 2, (stalCeilFloor + 60) - (stalCeil - 60));
+                fg.strokeRect(sx - colW, stalCeil - 60, colW * 2, (stalCeilFloor + 60) - (stalCeil - 60));
+            }
 
             // Stalactite
             fg.beginPath();
             fg.moveTo(sx - hw, stalCeil - 60); fg.lineTo(sx + hw, stalCeil - 60); fg.lineTo(sx, stalCeil + stalH); fg.closePath();
             fg.fillPath(); fg.strokePath();
 
-            // Stalagmite
+            // Stalagmite (drawn as an organic upward-pointing triangle)
             let stagW = Math.max(6, hw * 1.3 + Math.sin(i * 2.9) * 4);
-            fg.fillRect(sx - stagW, stalCeilFloor - stagH, stagW * 2, stagH + 60);
-            fg.strokeRect(sx - stagW, stalCeilFloor - stagH, stagW * 2, stagH + 60);
+            fg.beginPath();
+            fg.moveTo(sx - stagW, stalCeilFloor + 60);
+            fg.lineTo(sx + stagW, stalCeilFloor + 60);
+            fg.lineTo(sx, stalCeilFloor - stagH);
+            fg.closePath();
+            fg.fillPath(); fg.strokePath();
         }
 
         // --- NEAR layer (40% relative speed) ---
@@ -1343,8 +1355,8 @@ class ScubaFlowScene extends Phaser.Scene {
         let ng = this.parallaxNearGraphics;
         ng.clear();
         let nearHue = (this.baseHue + 110) % 360;
-        let nearColor = this.hslToColorInt(nearHue / 360, Math.min(1, baseSat * 1.4), Math.min(0.65, baseLum + 0.08));
-        let nearStrokeAlpha = baseAlpha * 1.4;
+        let nearColor = this.hslToColorInt(nearHue / 360, Math.min(1, baseSat * 1.1), Math.max(0.12, baseLum - 0.10));
+        let nearStrokeAlpha = baseAlpha * 0.65;
         ng.lineStyle(2, nearColor, nearStrokeAlpha);
 
         let nearFactor = 0.40;
@@ -1353,8 +1365,8 @@ class ScubaFlowScene extends Phaser.Scene {
         let nearEnd = nearStart + screenW + nearSpacing * 3;
 
         // Solid near-layer rock bands
-        ng.fillStyle(nearColor, nearStrokeAlpha * 0.50 + flowFill * 0.28);
-        ng.lineStyle(2, nearColor, nearStrokeAlpha * 0.8);
+        ng.fillStyle(nearColor, nearStrokeAlpha * 0.40 + flowFill * 0.18);
+        ng.lineStyle(2, nearColor, nearStrokeAlpha * 0.6);
         {
             let nStep = 80;
             let nCount = Math.ceil(screenW / nStep) + 2;
@@ -1365,7 +1377,7 @@ class ScubaFlowScene extends Phaser.Scene {
             for (let nb = 0; nb <= nCount; nb++) {
                 let nwx = nBase + nb * nStep;
                 let nsx = nwx + camX * (1 - nearFactor);
-                let nc = getCaveCeilY(nsx);
+                let nc = getCaveCeilY(nwx);
                 if (nFirst) { ng.moveTo(nsx, -50); ng.lineTo(nsx, nc); nFirst = false; }
                 else { ng.lineTo(nsx, nc); }
             }
@@ -1381,7 +1393,7 @@ class ScubaFlowScene extends Phaser.Scene {
             for (let nb = 0; nb <= nCount; nb++) {
                 let nwx = nBase + nb * nStep;
                 let nsx = nwx + camX * (1 - nearFactor);
-                let nf = getCaveFloorY(nsx);
+                let nf = getCaveFloorY(nwx);
                 if (nFirst) { ng.moveTo(nsx, 750); ng.lineTo(nsx, nf); nFirst = false; }
                 else { ng.lineTo(nsx, nf); }
             }
@@ -1397,9 +1409,11 @@ class ScubaFlowScene extends Phaser.Scene {
             let sx = worldX + camX * (1 - nearFactor);
             sx += Math.sin(i * 5.1) * 60;
 
+            let sampleX = worldX + Math.sin(i * 5.1) * 60;
+
             // Anchor each shape to its own screen x for correct cave profile
-            let nearFloor = getCaveFloorY(sx);
-            let nearCeil = getCaveCeilY(sx);
+            let nearFloor = getCaveFloorY(sampleX);
+            let nearCeil = getCaveCeilY(sampleX);
             let channelH = nearFloor - nearCeil;
             let maxH = Math.max(10, (channelH - 30) * 0.55); // leave ≥30px gap between tips
             let stalH = Math.min(maxH, 85 + Math.sin(i * 1.7) * 55);
@@ -1407,7 +1421,15 @@ class ScubaFlowScene extends Phaser.Scene {
             let hw = 13 + Math.sin(i * 4.2) * 6;
 
             // Fill alpha driven by flow level — 0 = wireframe, 1 = solid neon
-            ng.fillStyle(nearColor, Math.max(nearStrokeAlpha * 0.5, nearStrokeAlpha * flowFill));
+            ng.fillStyle(nearColor, Math.max(nearStrokeAlpha * 0.35, nearStrokeAlpha * flowFill * 0.75));
+
+            // Occasional cave columns representing fused stalactites/stalagmites (flared hourglass)
+            let isColumn = (Math.abs(i) % 5 === 0);
+            if (isColumn) {
+                let colW = Math.max(6, hw * 0.6);
+                ng.fillRect(sx - colW, nearCeil - 80, colW * 2, (nearFloor + 80) - (nearCeil - 80));
+                ng.strokeRect(sx - colW, nearCeil - 80, colW * 2, (nearFloor + 80) - (nearCeil - 80));
+            }
 
             // Stalactite
             ng.beginPath();
@@ -1415,10 +1437,14 @@ class ScubaFlowScene extends Phaser.Scene {
             ng.closePath();
             ng.fillPath(); ng.strokePath();
 
-            // Stalagmite
+            // Stalagmite (drawn as an organic upward-pointing triangle)
             let stagW = Math.max(8, hw * 1.3 + Math.sin(i * 3.1) * 5);
-            ng.fillRect(sx - stagW, nearFloor - stagH, stagW * 2, stagH + 80);
-            ng.strokeRect(sx - stagW, nearFloor - stagH, stagW * 2, stagH + 80);
+            ng.beginPath();
+            ng.moveTo(sx - stagW, nearFloor + 80);
+            ng.lineTo(sx + stagW, nearFloor + 80);
+            ng.lineTo(sx, nearFloor - stagH);
+            ng.closePath();
+            ng.fillPath(); ng.strokePath();
         }
     }
 
@@ -3003,6 +3029,16 @@ class ScubaFlowScene extends Phaser.Scene {
         let multiBeatScale = 1.0 + (this.scoreMultiplier - 1) * 0.4;
         let beatPulseOffset = (this.currentBeatPulse || 0) * 10 * (0.5 + localEnergy * 0.5) * multiBeatScale;
 
+        // Dynamic extra-wide and smooth start zone from spawn up to 750px
+        let isStartZone = wx < 750;
+        if (isStartZone) {
+            let tRatio = Math.max(0, Math.min(1, wx / 750));
+            // Let the starting zone be extra wide (120px) at spawn, smoothly tapering to standard width
+            baseOffset = 120 + (baseOffset - 120) * tRatio;
+            jaggednessMultiplier *= tRatio;
+            beatPulseOffset *= tRatio;
+        }
+
         // Dynamic minimum safety cap: shrinks from 68px (calm) to 50px (intense/metal), but must respect slopeClearance
         let minCap = Math.max(68 - localEnergy * 18, slopeClearance);
 
@@ -3657,8 +3693,11 @@ class ScubaFlowScene extends Phaser.Scene {
                 targetY = prevY + Math.sign(dy) * maxDeltaY;
             }
 
-            if (timeMs < 3000) {
-                let tRatio = timeMs / 3000;
+            let introDuration = (750 / this.baseScrollSpeed) * 1000;
+            if (timeMs < introDuration) {
+                targetY = 250;
+            } else if (timeMs < introDuration + 2000) {
+                let tRatio = (timeMs - introDuration) / 2000;
                 targetY = 250 + (targetY - 250) * tRatio;
             } else if (timeMs > levelLengthMs - 2000) {
                 let tRatio = (levelLengthMs - timeMs) / 2000;
@@ -3709,7 +3748,8 @@ class ScubaFlowScene extends Phaser.Scene {
         for (let i = 1; i < numCollectibleChunks - 1; i++) {
             let timeMs = i * windowSec * 1000;
 
-            if (timeMs < 3000 || timeMs > songLengthMs - 1200) continue;
+            let introDuration = (750 / this.baseScrollSpeed) * 1000;
+            if (timeMs < introDuration || timeMs > songLengthMs - 1200) continue;
 
             let energyVal, prevEnergyVal, nextEnergyVal, smoothedEnergyVal;
             if (i < rawEnergy.length) {
@@ -3957,9 +3997,9 @@ class ScubaFlowScene extends Phaser.Scene {
         // Verify collectibles generated on silent track
         console.assert(this.levelData.collectibles.length > 0, `Assertion Failed: Silent tracks must still generate collectibles to avoid empty tunnels`);
 
-        // Check maximum gap between collectibles in the playable region (3s to duration - 1.2s)
+        // Check maximum gap between collectibles in the playable region (introDuration to duration - 1.2s)
         let sortedCols = [...this.levelData.collectibles].sort((a, b) => a.time - b.time);
-        let lastTime = 3000;
+        let lastTime = (750 / this.baseScrollSpeed) * 1000;
         for (let col of sortedCols) {
             let gap = col.time - lastTime;
             console.assert(gap <= 6800, `Assertion Failed: Large gap between collectibles detected: ${gap}ms`);
