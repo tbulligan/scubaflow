@@ -41,6 +41,10 @@ class ScubaFlowScene extends Phaser.Scene {
         super({ key: 'ScubaFlowScene' });
     }
 
+    get visualMultiplier() {
+        return Math.min(9, this.scoreMultiplier);
+    }
+
     hslToColorInt(h, s, l) {
         let r, g, b;
         if (s === 0) {
@@ -114,6 +118,10 @@ class ScubaFlowScene extends Phaser.Scene {
         // Score Flow State points system
         this.siltFreeTime = 0;
         this.scoreMultiplier = 1;
+        this.comboCount = 0;
+        this.flowMeter = 1.0;
+        this.decayThreshold = 12500; // 12.5 seconds
+        this.lightFlashIntensity = 1.0;
         this.pointsScore = 0;
         this.maxPotentialPoints = 0;
         this.musicFilter = null;
@@ -438,7 +446,7 @@ class ScubaFlowScene extends Phaser.Scene {
                         console.warn("Failed to play countdown beep:", e);
                     }
 
-                    let stepDuration = numStr === 'FLOW!' ? 800 : 600;
+                    let stepDuration = 600;
                     this.tweens.add({
                         targets: this.countdownText,
                         scale: 1.5,
@@ -816,21 +824,31 @@ class ScubaFlowScene extends Phaser.Scene {
 
             // 6. Slow HSL Background Color cycle + Beat Flashes (Darker for dive lamp illumination)
             // Hue speed escalates with flow multiplier — at x5 it spins 3x as fast
-            let hueSpeed = 2.2 + (this.scoreMultiplier - 1) * 2.8;
+            let hueSpeed = 2.2 + (this.visualMultiplier - 1) * 2.8;
             this.baseHue = (this.baseHue + dt * hueSpeed) % 360;
             let bgHue = (this.baseHue * 0.25) % 360;
-            let multiBeat = 1.0 + (this.scoreMultiplier - 1) * 0.55;
+            let multiBeat = 1.0 + (this.visualMultiplier - 1) * 0.55;
             
             // Restrict background beat flashes & zoom throb exclusively to operational modes multiplier >= 8
             let lightnessBoost = 0.012;
             let targetZoom = 1.0;
-            if (this.scoreMultiplier >= 8) {
+            let bgSat = 0.7;
+            let multiplierSurplus = Math.max(0, this.visualMultiplier - 8);
+
+            if (this.visualMultiplier >= 8) {
                 // Softened beat flash & zoom throb to keep it energetic but not overwhelming
                 lightnessBoost += pulse * 0.010 * multiBeat;
                 targetZoom += pulse * 0.005 * multiBeat;
+                
+                if (this.visualMultiplier >= 9) {
+                    // Hyper-flow extra throb and saturation bleed
+                    bgSat = Math.min(1.0, 0.70 + multiplierSurplus * 0.05);
+                    lightnessBoost += Math.sin(this.elapsedTime * 0.006) * 0.005 * multiplierSurplus;
+                    targetZoom += pulse * 0.003 * multiplierSurplus;
+                }
             }
             
-            let bgColorVal = this.hslToColorInt(bgHue / 360, 0.7, lightnessBoost);
+            let bgColorVal = this.hslToColorInt(bgHue / 360, bgSat, lightnessBoost);
             this.cameras.main.setBackgroundColor(bgColorVal);
 
             // Camera micro-zoom throb on beats
@@ -925,8 +943,12 @@ class ScubaFlowScene extends Phaser.Scene {
                     this.siltActive = false;
                 }
                 this.scrollSpeed = Phaser.Math.Linear(this.scrollSpeed, this.baseScrollSpeed * 0.72, physDt * 3); // less punishing slowdown
+                this.lightFlashIntensity = 0.05; // Lock flashlight intensity at near-zero during silt-out
             } else {
                 this.scrollSpeed = Phaser.Math.Linear(this.scrollSpeed, this.baseScrollSpeed, physDt * 2.5);
+                if (this.lightFlashIntensity < 1.0) {
+                    this.lightFlashIntensity = Phaser.Math.Linear(this.lightFlashIntensity, 1.0, dt * 1.8);
+                }
             }
 
             // Update WebGL PostFX shader parameters (Chromatic Split)
@@ -938,26 +960,15 @@ class ScubaFlowScene extends Phaser.Scene {
                     : 0;
                 fx.chromaticOffset = siltOffset;
             }
-            // Score multiplier logic (avoiding silt-outs increases multiplier dynamically)
-            if (!this.siltActive) {
-                this.siltFreeTime += deltaMs;
-                let nextMilestone = this.flowMilestoneInterval || 10000;
-                if (this.siltFreeTime >= nextMilestone) {
-                    this.siltFreeTime = 0;
-                    if (this.scoreMultiplier < 8) {
-                        this.scoreMultiplier++;
-                        let bonusPoints = 50 * this.scoreMultiplier;
-                        this.pointsScore += bonusPoints;
-                        this.spawnFloatingText(this.player.x, this.player.y - 35, `FLOW x${this.scoreMultiplier}! +${bonusPoints}`, '#00ff66');
-                    } else {
-                        let bonusPoints = 50 * this.scoreMultiplier;
-                        this.pointsScore += bonusPoints;
-                        this.spawnFloatingText(this.player.x, this.player.y - 35, `MAX FLOW! +${bonusPoints}`, '#00f0ff');
-                        this.triggerMaxFlowPulse();
-                    }
+            // Flow multiplier decay logic (time without collecting debris reduces multiplier)
+            if (this.scoreMultiplier > 1 && !this.siltActive && this.isPlaying && !this.countdownActive) {
+                this.flowMeter -= (deltaMs / this.decayThreshold);
+                if (this.flowMeter <= 0) {
+                    this.scoreMultiplier--;
+                    this.flowMeter = 1.0;
+                    this.comboCount = 0; // Reset combo progress on decay
+                    this.spawnFloatingText(this.player.x, this.player.y - 35, `FLOW DECAY! x${this.scoreMultiplier}`, '#94a3b8');
                 }
-            } else {
-                this.siltFreeTime = 0;
             }
 
             // Update speech bubbles positions
@@ -1100,7 +1111,7 @@ class ScubaFlowScene extends Phaser.Scene {
         });
 
         this.siltEmitter = this.add.particles(0, 0, 'silt_cloud', {
-            lifespan: { min: 2000, max: 4500 },
+            lifespan: { min: 800, max: 1600 },
             scale: { start: 4.0, end: 24.0 }, // Massive silt clouds
             alpha: { start: 0.9, end: 0 },
             frequency: -1,
@@ -1184,9 +1195,14 @@ class ScubaFlowScene extends Phaser.Scene {
         let bHandX = this.buddy.x + 26 * bDir;
         let bHandY = this.buddy.y - 2;
 
+        let speedMultiplier = 1.0;
+        if (this.visualMultiplier >= 9) {
+            speedMultiplier += (this.visualMultiplier - 8) * 0.15;
+        }
+
         for (let mote of this.marineSnowMotes) {
-            mote.x += mote.vx * dt;
-            mote.y += mote.vy * dt;
+            mote.x += mote.vx * dt * speedMultiplier;
+            mote.y += mote.vy * dt * speedMultiplier;
 
             // Wrap screen boundaries
             if (mote.x < 0) mote.x += 1200;
@@ -1221,7 +1237,7 @@ class ScubaFlowScene extends Phaser.Scene {
     drawParallax(time) {
         let camX = this.cameras.main.scrollX;
         let screenW = 1300;
-        let multiFactor = this.scoreMultiplier - 1;
+        let multiFactor = this.visualMultiplier - 1;
         let baseSat = this.siltActive ? 0.05 : Math.min(0.85, 0.25 + multiFactor * 0.086);
         let baseLum = this.siltActive ? 0.15 : Math.min(0.55, 0.25 + multiFactor * 0.043);
         let baseAlpha = this.siltActive ? 0.08 : Math.min(0.55, 0.18 + multiFactor * 0.053);
@@ -1247,7 +1263,7 @@ class ScubaFlowScene extends Phaser.Scene {
         };
 
         // flowFill: 0 at multiplier x1 (wireframe), 1 at multiplier x8 (full solid neon) - gradual power curve
-        let flowFill = Math.pow((this.scoreMultiplier - 1) / 7.0, 1.5);
+        let flowFill = Math.pow((this.visualMultiplier - 1) / 7.0, 1.5);
 
         // --- FAR layer (10% relative speed, screen-space) ---
         // Far layer is visibly FAINTER than the near layer — lower lum and lower alpha.
@@ -1478,8 +1494,8 @@ class ScubaFlowScene extends Phaser.Scene {
         let bgG = this.backgroundGraphics;
         bgG.clear();
 
-        let flowSat = this.siltActive ? 0.15 : Math.min(1.0, 0.45 + (this.scoreMultiplier - 1) * 0.08);
-        let flowLightBoost = this.siltActive ? -0.15 : Math.min(0.12, (this.scoreMultiplier - 1) * 0.017);
+        let flowSat = this.siltActive ? 0.15 : Math.min(1.0, 0.45 + (this.visualMultiplier - 1) * 0.08);
+        let flowLightBoost = this.siltActive ? -0.15 : Math.min(0.12, (this.visualMultiplier - 1) * 0.017);
 
         for (let r of this.beatRipples) {
             let hue = (this.baseHue + r.radius * 0.15) % 360;
@@ -1554,21 +1570,21 @@ class ScubaFlowScene extends Phaser.Scene {
         let pulse = this.currentBeatPulse || 0;
 
         // Dynamic flow-state color popping based on silt-free multiplier
-        let flowSat = this.siltActive ? 0.15 : Math.min(1.0, 0.45 + (this.scoreMultiplier - 1) * 0.08);
-        let flowLightBoost = this.siltActive ? -0.15 : Math.min(0.12, (this.scoreMultiplier - 1) * 0.017);
+        let flowSat = this.siltActive ? 0.15 : Math.min(1.0, 0.45 + (this.visualMultiplier - 1) * 0.08);
+        let flowLightBoost = this.siltActive ? -0.15 : Math.min(0.12, (this.visualMultiplier - 1) * 0.017);
 
         let playerHue = (this.baseHue + 320) % 360; // Pink/Magenta base (distinct from buddy)
         let mainColor = this.hslToColorInt(playerHue / 360, flowSat, 0.55 + flowLightBoost);
         let accentColor = this.hslToColorInt(((playerHue + 130) % 360) / 360, flowSat, 0.6 + flowLightBoost); // Neon Green/Yellow
 
         if (this.avatarType === 'diver') {
-            let glowRadius = 20 + this.V_lung * 8 + pulse * 8 + (this.scoreMultiplier - 1) * 4;
+            let glowRadius = 20 + this.V_lung * 8 + pulse * 8 + (this.visualMultiplier - 1) * 4;
             g.fillStyle(mainColor, 0.08 + this.V_lung * 0.04 + pulse * 0.08);
             g.fillCircle(0, 0, glowRadius);
 
             // --- AURA RINGS: concentric neon rings that grow with scoreMultiplier ---
             // x1: none. x2-x7: rings. x8+: 7 rings.
-            let auraLevels = Math.min(this.scoreMultiplier - 1, 7);
+            let auraLevels = Math.min(this.visualMultiplier - 1, 7);
             for (let a = 0; a < auraLevels; a++) {
                 let auraHue = (this.baseHue + a * 75) % 360;
                 let auraColor = this.hslToColorInt(auraHue / 360, 1.0, 0.65);
@@ -1759,9 +1775,10 @@ class ScubaFlowScene extends Phaser.Scene {
             g.strokeRoundedRect(handX - 1, handY - 3, 6, 6, 1);
 
             // Cave Diving Primary Light Beam
-            let beamLength = 280;
-            let beamSpread = 50;
-            g.fillStyle(accentColor, 0.08); // soft neon glowing beam
+            let beamIntensity = this.lightFlashIntensity !== undefined ? this.lightFlashIntensity : 1.0;
+            let beamLength = 280 * beamIntensity;
+            let beamSpread = 50 * beamIntensity;
+            g.fillStyle(accentColor, 0.08 * beamIntensity); // soft neon glowing beam
             g.beginPath();
             g.moveTo(handX + 3, handY);
             g.lineTo(handX + 3 + beamLength, handY - beamSpread);
@@ -1898,8 +1915,8 @@ class ScubaFlowScene extends Phaser.Scene {
         let pulse = this.currentBeatPulse || 0;
 
         // Dynamic flow-state color popping based on silt-free multiplier
-        let flowSat = this.siltActive ? 0.15 : Math.min(1.0, 0.45 + (this.scoreMultiplier - 1) * 0.08);
-        let flowLightBoost = this.siltActive ? -0.15 : Math.min(0.12, (this.scoreMultiplier - 1) * 0.017);
+        let flowSat = this.siltActive ? 0.15 : Math.min(1.0, 0.45 + (this.visualMultiplier - 1) * 0.08);
+        let flowLightBoost = this.siltActive ? -0.15 : Math.min(0.12, (this.visualMultiplier - 1) * 0.017);
 
         // Cycle the buddy neon color (complementary hue)
         let buddyHue = (this.baseHue + 180) % 360; // Cyan base (distinct from player)
@@ -2104,23 +2121,28 @@ class ScubaFlowScene extends Phaser.Scene {
         // Player Light (hand is at 26, -2 relative to player container)
         let pHandX = this.player.x + 26;
         let pHandY = this.player.y - 2;
-        this.drawDiveLight(g, pHandX, pHandY, 1, 0xffffff, pAccent, pHue);
+        this.drawDiveLight(g, pHandX, pHandY, 1, 0xffffff, pAccent, pHue, true);
 
         // Buddy Light (hand is at 26, -2 relative to buddy container, scaled by scaleX)
         let bDir = this.buddy.scaleX; // 1 or -1
         let bHandX = this.buddy.x + 26 * bDir;
         let bHandY = this.buddy.y - 2;
-        this.drawDiveLight(g, bHandX, bHandY, bDir, 0xffffff, bAccent, bHue);
+        this.drawDiveLight(g, bHandX, bHandY, bDir, 0xffffff, bAccent, bHue, false);
     }
 
-    drawDiveLight(g, x0, y0, dir, mainColor, accentColor, hueVal) {
+    drawDiveLight(g, x0, y0, dir, mainColor, accentColor, hueVal, isPlayer = false) {
         let beamLength = 320;
         let beamSpread = 75;
         let steps = 30;
+
+        let intensity = this.lightFlashIntensity !== undefined ? this.lightFlashIntensity : 1.0;
+        beamLength *= intensity;
+        beamSpread *= intensity;
+
         let stepX = (beamLength / steps) * dir;
 
-        let flowSat = this.siltActive ? 0.15 : Math.min(1.0, 0.45 + (this.scoreMultiplier - 1) * 0.08);
-        let flowLightBoost = this.siltActive ? -0.15 : Math.min(0.12, (this.scoreMultiplier - 1) * 0.017);
+        let flowSat = this.siltActive ? 0.15 : Math.min(1.0, 0.45 + (this.visualMultiplier - 1) * 0.08);
+        let flowLightBoost = this.siltActive ? -0.15 : Math.min(0.12, (this.visualMultiplier - 1) * 0.017);
 
         let lightCol = this.hslToColorInt(hueVal, flowSat, 0.65 + flowLightBoost);
 
@@ -2155,7 +2177,7 @@ class ScubaFlowScene extends Phaser.Scene {
         }
 
         // Draw main beam
-        g.fillStyle(lightCol, 0.16 + (this.scoreMultiplier - 1) * 0.02);
+        g.fillStyle(lightCol, (0.16 + (this.visualMultiplier - 1) * 0.02) * intensity);
         g.beginPath();
         g.moveTo(x0, y0);
         for (let pt of topPoints) {
@@ -2168,7 +2190,7 @@ class ScubaFlowScene extends Phaser.Scene {
         g.fillPath();
 
         // Draw inner bright core beam
-        g.fillStyle(0xffffff, 0.08 + (this.scoreMultiplier - 1) * 0.01);
+        g.fillStyle(0xffffff, (0.08 + (this.visualMultiplier - 1) * 0.01) * intensity);
         g.beginPath();
         g.moveTo(x0, y0);
         for (let i = 0; i <= steps; i++) {
@@ -2269,11 +2291,11 @@ class ScubaFlowScene extends Phaser.Scene {
         let ceilHue = (baseCeilHue + this.baseHue * 0.5) % 360;
 
         // Dynamic flow-state color popping based on silt-free multiplier
-        let flowSat = this.siltActive ? 0.15 : Math.min(1.0, 0.45 + (this.scoreMultiplier - 1) * 0.08);
-        let flowLightBoost = this.siltActive ? -0.15 : Math.min(0.12, (this.scoreMultiplier - 1) * 0.017);
+        let flowSat = this.siltActive ? 0.15 : Math.min(1.0, 0.45 + (this.visualMultiplier - 1) * 0.08);
+        let flowLightBoost = this.siltActive ? -0.15 : Math.min(0.12, (this.visualMultiplier - 1) * 0.017);
 
         // flowFill: 0 = wireframe (multiplier x1), 1 = fully solid neon (multiplier x8+) - gradual power curve
-        let flowFill = Math.pow((this.scoreMultiplier - 1) / 7.0, 1.5);
+        let flowFill = Math.pow((this.visualMultiplier - 1) / 7.0, 1.5);
 
         // At high flow, walls use full neon saturation; at low flow, muted
         let wallSat = this.siltActive ? 0.15 : Math.min(1.0, flowSat + flowFill * 0.3);
@@ -2328,16 +2350,6 @@ class ScubaFlowScene extends Phaser.Scene {
         g.lineTo(floorPoints[floorPoints.length - 1].x, 800);
         g.closePath();
         g.fillPath();
-        // Dark backing only at low/mid flow so rock feels solid at low levels
-        if (flowFill < 0.8) {
-            g.fillStyle(0x020410, 0.95 - flowFill * 0.9);
-            g.beginPath();
-            g.moveTo(floorPoints[0].x, 800);
-            for (let pt of floorPoints) { g.lineTo(pt.x, pt.y); }
-            g.lineTo(floorPoints[floorPoints.length - 1].x, 800);
-            g.closePath();
-            g.fillPath();
-        }
         g.strokePath();
 
         g.lineStyle(1.0, floorColor, (0.25 + flowFill * 0.35) * lineAlpha);
@@ -2359,15 +2371,6 @@ class ScubaFlowScene extends Phaser.Scene {
         g.lineTo(ceilPoints[ceilPoints.length - 1].x, -100);
         g.closePath();
         g.fillPath();
-        if (flowFill < 0.8) {
-            g.fillStyle(0x020410, 0.95 - flowFill * 0.9);
-            g.beginPath();
-            g.moveTo(ceilPoints[0].x, -100);
-            for (let pt of ceilPoints) { g.lineTo(pt.x, pt.y); }
-            g.lineTo(ceilPoints[ceilPoints.length - 1].x, -100);
-            g.closePath();
-            g.fillPath();
-        }
         g.strokePath();
 
         g.lineStyle(1.0, ceilColor, (0.25 + flowFill * 0.35) * lineAlpha);
@@ -2398,7 +2401,7 @@ class ScubaFlowScene extends Phaser.Scene {
                     let plumeColor = this.hslToColorInt(plumeHue / 360, 0.9, 0.6);
                     
                     // Dynamic scaling of vents based on Flow multiplier
-                    let mult = this.scoreMultiplier || 1;
+                    let mult = this.visualMultiplier || 1;
                     let ventScaleStart = 1.0 + (mult - 1) * 0.3; // x1: 1.0, x8: 3.1
                     let ventScaleEnd = 2.5 + (mult - 1) * 1.0;   // x1: 2.5, x8: 9.5
                     let ventAlpha = 0.06 + (mult - 1) * 0.02;    // x1: 0.06, x8: 0.20
@@ -2604,10 +2607,10 @@ class ScubaFlowScene extends Phaser.Scene {
 
         // Far-parallax background colour used for depth-window fill
         let farHue = (this.baseHue + 200) % 360;
-        let farAlpha = Math.min(0.55, 0.18 + (this.scoreMultiplier - 1) * 0.053) * 0.45;
-        let farLum = Math.max(0.05, (this.siltActive ? 0.15 : Math.min(0.55, 0.25 + (this.scoreMultiplier - 1) * 0.043)) - 0.12);
+        let farAlpha = Math.min(0.55, 0.18 + (this.visualMultiplier - 1) * 0.053) * 0.45;
+        let farLum = Math.max(0.05, (this.siltActive ? 0.15 : Math.min(0.55, 0.25 + (this.visualMultiplier - 1) * 0.043)) - 0.12);
         let farColor = this.hslToColorInt(farHue / 360,
-            (this.siltActive ? 0.05 : Math.min(0.85, 0.25 + (this.scoreMultiplier - 1) * 0.086)) * 0.8,
+            (this.siltActive ? 0.05 : Math.min(0.85, 0.25 + (this.visualMultiplier - 1) * 0.086)) * 0.8,
             farLum);
 
         let firstSlot = Math.floor(startX / SLOT_SIZE);
@@ -2808,9 +2811,12 @@ class ScubaFlowScene extends Phaser.Scene {
 
                 this.score++;
 
-                // Base points
-                let gainedPoints = 1 * this.scoreMultiplier;
-                this.pointsScore += gainedPoints;
+                // Increment combo and reset flow decay meter
+                this.comboCount++;
+                this.flowMeter = 1.0;
+
+                let isClusterComplete = false;
+                let clusterBonusCombo = 0;
 
                 // Track cluster progress
                 if (cid) {
@@ -2819,13 +2825,46 @@ class ScubaFlowScene extends Phaser.Scene {
 
                     let totalInCluster = this.clusterTotals[cid] || 0;
                     if (this.clusterCollected[cid] === totalInCluster && totalInCluster > 1) {
-                        // Full Cluster Bonus!
-                        let bonus = Math.floor((totalInCluster * 1.5) * this.scoreMultiplier);
-                        this.pointsScore += bonus;
-                        this.spawnFloatingText(this.player.x, this.player.y - 30, `CLUSTER BONUS! +${bonus}`, '#00f0ff');
-                    } else {
-                        this.spawnFloatingText(this.player.x, this.player.y - 20, `+${gainedPoints}`, '#bd00ff');
+                        isClusterComplete = true;
+                        // Award combo point boost instead of instant multiplier jump
+                        clusterBonusCombo = 5;
+                        this.comboCount += clusterBonusCombo;
                     }
+                }
+
+                // Apply combo level up if threshold hit
+                let comboBumpsCount = 0;
+                let comboBonus = 0;
+                while (this.comboCount >= 15) {
+                    this.comboCount -= 15;
+                    this.scoreMultiplier++;
+                    comboBumpsCount++;
+                    comboBonus += 50 * this.scoreMultiplier;
+                }
+
+                // Base points
+                let gainedPoints = 1 * this.scoreMultiplier;
+                this.pointsScore += gainedPoints;
+
+                // Cluster point bonus is based on totalInCluster and current multiplier
+                let clusterPointBonus = 0;
+                if (isClusterComplete) {
+                    let totalInCluster = this.clusterTotals[cid] || 0;
+                    clusterPointBonus = Math.floor((totalInCluster * 1.5) * this.scoreMultiplier);
+                    this.pointsScore += clusterPointBonus;
+                }
+
+                if (comboBumpsCount > 0) {
+                    this.pointsScore += comboBonus;
+                }
+
+                if (isClusterComplete && comboBumpsCount > 0) {
+                    this.spawnFloatingText(this.player.x, this.player.y - 30, `FLOW x${this.scoreMultiplier}! +${comboBonus}`, '#00ff66');
+                    this.spawnFloatingText(this.player.x, this.player.y - 15, `+${clusterPointBonus}`, '#00f0ff');
+                } else if (isClusterComplete) {
+                    this.spawnFloatingText(this.player.x, this.player.y - 30, `+${clusterPointBonus}`, '#00f0ff');
+                } else if (comboBumpsCount > 0) {
+                    this.spawnFloatingText(this.player.x, this.player.y - 35, `FLOW x${this.scoreMultiplier}! +${comboBonus}`, '#00ff66');
                 } else {
                     this.spawnFloatingText(this.player.x, this.player.y - 20, `+${gainedPoints}`, '#bd00ff');
                 }
@@ -2916,6 +2955,8 @@ class ScubaFlowScene extends Phaser.Scene {
             this.siltActive = true;
             this.siltTime = currentDuration;
             this.currentSiltDuration = currentDuration;
+            this.comboCount = 0;
+            this.flowMeter = 1.0;
             if (this.scoreMultiplier > 1) {
                 this.scoreMultiplier = 1;
                 this.spawnFloatingText(this.player.x, this.player.y - 35, "FLOW RESET", '#ff1e56');
@@ -2924,6 +2965,8 @@ class ScubaFlowScene extends Phaser.Scene {
             }
             this.siltFreeTime = 0;
         } else {
+            this.comboCount = 0;
+            this.flowMeter = 1.0;
             // If already in a silt-out, only update if the new impact is stronger than what was used to set the current remaining time
             if (currentDuration > this.siltTime) {
                 this.siltTime = currentDuration;
@@ -3052,7 +3095,7 @@ class ScubaFlowScene extends Phaser.Scene {
         let jaggednessMultiplier = 0.35 + localEnergy * 0.85;
 
         // Beat pulse scaled by multiplier — expands the cave on beat hits
-        let multiBeatScale = 1.0 + (this.scoreMultiplier - 1) * 0.4;
+        let multiBeatScale = 1.0 + (this.visualMultiplier - 1) * 0.4;
         let beatPulseOffset = (this.currentBeatPulse || 0) * 10 * (0.5 + localEnergy * 0.5) * multiBeatScale;
 
         // Dynamic extra-wide and smooth start zone from spawn up to 750px
@@ -3895,59 +3938,66 @@ class ScubaFlowScene extends Phaser.Scene {
         let simMultiplier = 1;
         let simPoints = 0;
         let clusterCounts = {};
+        let simCombo = 0;
+        let lastColTime = 0;
 
         // Sort collectibles chronologically to process in order
         let sortedCollectibles = [...this.levelData.collectibles].sort((a, b) => a.time - b.time);
 
-        let events = [];
+        for (let i = 0; i < sortedCollectibles.length; i++) {
+            let col = sortedCollectibles[i];
 
-        // 1. Flow milestones (every flowMilestoneInterval up to songLengthMs + 2000)
-        let interval = this.flowMilestoneInterval || 10000;
-        let totalDuration = this.levelData.songLengthMs + 2000;
-        for (let t = interval; t <= totalDuration; t += interval) {
-            events.push({
-                type: 'flow',
-                time: t
-            });
-        }
-
-        // 2. Collectible collection events
-        for (let col of sortedCollectibles) {
-            events.push({
-                type: 'collectible',
-                time: col.time,
-                clusterId: col.clusterId
-            });
-        }
-
-        // Sort events chronologically. If times are identical, process collectibles before flow milestones.
-        events.sort((a, b) => {
-            if (a.time !== b.time) return a.time - b.time;
-            return a.type === 'collectible' ? -1 : 1;
-        });
-
-        // Run simulation of perfect silt-free run
-        for (let ev of events) {
-            if (ev.type === 'flow') {
-                simMultiplier = Math.min(8, simMultiplier + 1);
-                simPoints += 50 * simMultiplier;
-            } else if (ev.type === 'collectible') {
-                // Base point
-                simPoints += 1 * simMultiplier;
-
-                // Cluster progress
-                let cid = ev.clusterId;
-                if (cid) {
-                    if (!clusterCounts[cid]) clusterCounts[cid] = 0;
-                    clusterCounts[cid]++;
-
-                    let totalInCluster = this.clusterTotals[cid] || 0;
-                    if (clusterCounts[cid] === totalInCluster && totalInCluster > 1) {
-                        let bonus = Math.floor((totalInCluster * 1.5) * simMultiplier);
-                        simPoints += bonus;
+            // Apply flow decay if gap exceeds decay threshold (12.5 seconds / 12500ms)
+            // Only decays if simMultiplier > 1
+            if (i > 0 && simMultiplier > 1) {
+                let gap = col.time - lastColTime;
+                let decayTicks = Math.floor(gap / 12500);
+                for (let d = 0; d < decayTicks; d++) {
+                    if (simMultiplier > 1) {
+                        simMultiplier--;
                     }
                 }
             }
+
+            let isClusterComplete = false;
+            let clusterPointBonus = 0;
+            let cid = col.clusterId;
+            if (cid) {
+                if (!clusterCounts[cid]) clusterCounts[cid] = 0;
+                clusterCounts[cid]++;
+                let totalInCluster = this.clusterTotals[cid] || 0;
+                if (clusterCounts[cid] === totalInCluster && totalInCluster > 1) {
+                    isClusterComplete = true;
+                    // Award combo point boost
+                    simCombo += 5;
+                }
+            }
+
+            // Apply combo level up if threshold hit
+            let comboBumpsCount = 0;
+            let comboBonus = 0;
+            simCombo++;
+            while (simCombo >= 15) {
+                simCombo -= 15;
+                simMultiplier++;
+                comboBumpsCount++;
+                comboBonus += 50 * simMultiplier;
+            }
+
+            // Award base point and bonuses
+            simPoints += 1 * simMultiplier;
+
+            if (isClusterComplete) {
+                let totalInCluster = this.clusterTotals[cid] || 0;
+                clusterPointBonus = Math.floor((totalInCluster * 1.5) * simMultiplier);
+                simPoints += clusterPointBonus;
+            }
+
+            if (comboBumpsCount > 0) {
+                simPoints += comboBonus;
+            }
+
+            lastColTime = col.time;
         }
 
         return simPoints;
@@ -4101,6 +4151,26 @@ class ScubaFlowScene extends Phaser.Scene {
 
         let totalDt = dt1 + dt2 + dt3;
         console.assert(Math.abs(totalDt - 0.0333) < 0.0001, `Assertion Failed: Expect total dt to be 0.0333, got ${totalDt}`);
+
+        // Test 10: Uncapped Combo Engine and Rating Math Simulation validation
+        let mockCollectibles = [];
+        for (let j = 0; j < 15; j++) {
+            mockCollectibles.push({ time: j * 1000, y: 300, clusterId: null });
+        }
+        for (let j = 0; j < 5; j++) {
+            mockCollectibles.push({ time: 20000 + j * 300, y: 300, clusterId: "test_c1" });
+        }
+        
+        let originalLevelDataVal = this.levelData;
+        let originalClusterTotalsVal = this.clusterTotals;
+        this.levelData = {
+            songLengthMs: 30000,
+            collectibles: mockCollectibles
+        };
+        this.clusterTotals = { "test_c1": 5 };
+
+        let maxPoints = this.calculateMaxPotentialPoints();
+        console.assert(maxPoints === 141, `Assertion Failed: Expected simulated max potential points to be 141, got ${maxPoints}`);
 
         // Restore original state
         this.levelData = originalLevelData;

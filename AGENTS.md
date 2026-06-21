@@ -42,7 +42,7 @@ For ScubaFlow, this specifically means:
   - **buoyancy tuning**: buoyancy responsiveness coefficient is set to `4.8` and buoyancy vertical acceleration $a_y$ is set to `640` to ensure responsive, enjoyable vertical adjustments while preventing twitchy oversteering.
 
 ### Start Countdown Timer
-- To allow players to prepare for the level, the game displays a Start-of-Dive fading track info overlay (`showTrackStartOverlay()`) for 2.0 seconds, followed immediately by an accelerated numeric countdown timer (three 600ms ticks for "3", "2", "1" and an 800ms tick for "FLOW!").
+- To allow players to prepare for the level, the game displays a Start-of-Dive fading track info overlay (`showTrackStartOverlay()`) for 2.0 seconds, followed immediately by an accelerated numeric countdown timer (four 600ms ticks for "3", "2", "1", and "FLOW!").
 - During this entire countdown sequence (including both the track start overlay and the numeric ticks), positions of the player and buddy are frozen at the starting section of the cave, level progression time is paused at `elapsedTime = 0`, and the background/terrain layers are kept fully rendered.
 - **Flat Starting Zone:** The level generator enforces a flat, wide starting zone (`introDuration = (750 / baseScrollSpeed) * 1000` ms, matching $750\text{px}$ from start) on the centerline (Y=250) of the cave. Both the player (spawned at `x = 250`) and buddy (spawned at `x = 550`) are guaranteed to spawn safely within this wide, flat starting corridor without wall collision, and collectibles are blocked from spawning before `introDuration` to ensure they are never out of reach at spawn.
 - Visual ticks are accompanied by procedural audio tone chirps generated via raw `AudioContext` oscillators. Once the countdown completes, the custom audio engine begins and standard gameplay commences.
@@ -58,7 +58,7 @@ For ScubaFlow, this specifically means:
   - The game dynamically samples the local corridor slope $S = dy/dx$ from the path center generator.
   - The minimum safety cap `minCap` and `baseOffset` dynamically scale using `slopeClearance = 28.5 + (S < 0 ? -29.0 * S : 32.0 * S)` to expand the cave on steep upward and downward sections.
   - This guarantees that all generated sloping tunnels are navigable and that all procedural collectibles (spanned up to $24\text{px}$ offset and dynamically clamped to be at least $40\text{px}$ clear of both floor and ceiling boundaries at their exact position) are mathematically attainable without colliding.
-
+- **Stable Cave Geometry**: To ensure predictable collision detection and clear navigation, the physical cave boundaries (`getWallOffsets` and `drawTerrain`) are kept completely stable and are not physically warped or wiggled by beat pulses.
 ### End of Dive Sequence
 - The level completion triggers when the player reaches the end coordinates (`player.x >= targetEndX` where `targetEndX = 250 + (songLengthMs / 1000) * baseScrollSpeed`), the track time completes (`elapsedTime >= songLengthMs`), or `musicSource.onended` fires.
   - **Constant Scroll Speed:** To ensure points are calculated deterministically and gameplay matches the music exactly, horizontal scroll speed is kept constant (`scrollSpeed = baseScrollSpeed`) at all times.
@@ -67,15 +67,33 @@ For ScubaFlow, this specifically means:
 - A redundant `setTimeout` fallback is used in `startFadeout` alongside Phaser's clock-based `time.delayedCall` to ensure the HTML results card is successfully rendered in the DOM even when the window is blurred.
 - During this transition, the camera fades out to `#020514` and the Web Audio API master gain exponentially ramps down to `0.0001`, while all regular gameplay systems (including collision detection and collectible collecting) remain fully active.
 
-### Zero-HUD Diegetic Signals
+### Zero-HUD Diegetic Signals & Balance Mechanics
 All gameplay feedback is represented physically and auditorily:
 - **Depth**: Indicated by ambient background HSL color shifts (darkening/shifting colors) and the buddy's depth.
 - **Lung Volume**: Indicated by player sprite chest expansion (ellipse scaling) and breathing audio synth frequencies.
-- **Failure - Silt-Out**: Floor/ceiling collision blinds the player with particle clouds. The player must wait for the silt to clear while staying steady.
+- **Failure - Silt-Out & Light Cone Failure**: Floor/ceiling collision blinds the player with particle clouds. The player must wait for the silt to clear while staying steady.
   - **Relative Duration**: Silt-out blindness recovery time is proportional to vertical impact velocity (`impactVy`), scaling between 0.44x and 1.33x of `siltDuration` (~800ms to ~2400ms). Soft scrapes are less punishing than hard vertical bumps. Additionally, the duration scales inversely with `baseScrollSpeed` (using the factor $50/\text{baseScrollSpeed}$) to maintain a consistent horizontal distance traveled while blinded across different level speeds.
   - **Dynamic Color Shifts**: On each wall collision, `this.baseHue` shifts complementary by 120 degrees, producing a dramatic, dynamic transition of the cave color palette and matched silt particle coloring.
+  - **Light Failure**: On wall impact, the player's primary light cone (beam length, spread, and opacity) contracts to 5% of its normal capacity and gradually scales back to 100% intensity as the silt time decays.
+  - **Aura Vaporization**: Active neon oscilloscope aura rings are instantly vaporized (reset to 0 active rings) on impact and must be rebuilt one by one.
   - **Guideline Lifeline**: The buddy's guide line is rendered on the terrain graphics layer (depth 0) and is obscured during a silt-out, mirroring the realism of losing visibility of the guideline in a sediment cloud. The player must follow the buddy's speech bubbles ("👌?")—which render at depth 20 (above the silt overlay)—to orient themselves and guide recovery.
 - **AI Buddy**: Displays helper speech bubbles ("👌?", "👌!") when assisting the player or clearing/recovering from silt. The buddy utilizes a safe (15px margin) and absolute (2px margin/midpoint fallback) terrain-clamping algorithm so they never collide with the walls or raise sediment on their own.
+
+### Active Debris-Driven Multipliers
+Instead of time-based milestones, multiplier growth is performance-driven:
+- **The Combo Engine**: Collecting 15 consecutive pieces of neon debris without hitting a wall increases the multiplier by $+1$.
+- **Cluster Combo Boost**: Collecting 100% of a distinct procedural cluster (tracked via `clusterId`) awards a $+5$ combo point boost to accelerate multiplier progression, alongside the points bonus.
+- **Flow Decay Meter**: If the player does not collect debris for 12.5 seconds, the multiplier decays by $1$, resetting the decay buffer. Collecting any debris refills the decay buffer to 100%.
+
+### "Hyper-Flow" State ($\ge \times 9$)
+When the flow multiplier is $\ge \times 9$, advanced aesthetic shifts occur (capped at $\times 9$ intensity so visuals do not scale further):
+- **Scrolling Rainbow Contours**: Terrain near and far line stroke hues dynamically cycle over time, rendering the cave profile as a shifting rainbow matrix.
+- **Background Saturation Bleed**: The background color bleeds into a highly saturated, breathing pulse matrix.
+- **Particle Frenzy**: Marine snow motes speed up to enhance the illusion of extreme speed.
+
+### Uncapped Deterministic Simulation
+- Rating calculations utilize the simulation function `calculateMaxPotentialPoints()`.
+- The simulation chronologically replicates the perfect run (all items collected, no silt-outs), factoring in the combo increments, cluster combo boosts, and decay gaps to compute the theoretical maximum score ($S_{max}$). This ensures the 5-star rating (awarded at $\ge 95\%$ of $S_{max}$) remains fully deterministic.
 
 ---
 
