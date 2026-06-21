@@ -45,6 +45,36 @@ class ScubaFlowScene extends Phaser.Scene {
         return Math.min(9, this.scoreMultiplier);
     }
 
+    normalizeAudioBuffer(audioBuffer) {
+        let numChannels = audioBuffer.numberOfChannels;
+        let peak = 0;
+
+        // Find the absolute peak amplitude across all channels to preserve stereo balance
+        for (let c = 0; c < numChannels; c++) {
+            let channelData = audioBuffer.getChannelData(c);
+            for (let i = 0; i < channelData.length; i++) {
+                let absVal = Math.abs(channelData[i]);
+                if (absVal > peak) {
+                    peak = absVal;
+                }
+            }
+        }
+
+        // Scale all channels uniformly if the peak is lower than target (0.98 to avoid clipping)
+        if (peak > 0 && peak < 0.95) {
+            let scale = 0.98 / peak;
+            for (let c = 0; c < numChannels; c++) {
+                let channelData = audioBuffer.getChannelData(c);
+                for (let i = 0; i < channelData.length; i++) {
+                    channelData[i] *= scale;
+                }
+            }
+            console.log(`AudioBuffer normalized in-place. Peak: ${peak.toFixed(4)} -> 0.98 (scaled by ${scale.toFixed(2)}x)`);
+        } else {
+            console.log(`AudioBuffer peak is ${peak.toFixed(4)}. Normalization skipped.`);
+        }
+    }
+
     hslToColorInt(h, s, l) {
         let r, g, b;
         if (s === 0) {
@@ -301,6 +331,10 @@ class ScubaFlowScene extends Phaser.Scene {
                     ctx.decodeAudioData(window.customAudioBuffer.slice(0), (decodedBuffer) => {
                         try {
                             console.log("decodeAudioData success! Buffer duration:", decodedBuffer.duration, "channels:", decodedBuffer.numberOfChannels, "sampleRate:", decodedBuffer.sampleRate);
+                            
+                            // Normalize the audio buffer to ensure consistent gameplay generation and volume
+                            this.normalizeAudioBuffer(decodedBuffer);
+                            
                             this.customDecodedBuffer = decodedBuffer;
 
                             // Procedurally generate level from the custom track

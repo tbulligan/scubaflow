@@ -35,6 +35,7 @@ For ScubaFlow, this specifically means:
   - The procedural generator computes a 32-bit FNV-1a hash of the track's duration, sample rate, and a 1000-point sample of its channel data.
   - This hash is used as the seed for a custom Mulberry32 PRNG.
   - All randomized generation choices (such as `forceSpawn` cluster patterns and ascending/descending slope directions) use this PRNG instead of the standard unseeded `Math.random()`, guaranteeing that replaying the same audio file produces the identical level layout, collectible density, and maximum potential score every time.
+- **Audio Normalization**: To ensure consistent beat parsing, energy difficulty mapping, and volume comfort, the game performs stereo-safe in-place normalization of the decoded track before generation and playback. All audio channels are scaled uniformly so that the peak amplitude reaches `0.98`, avoiding clipping while boosting quiet tracks.
 ### Breath Physics & State Machine
 - Vertical motion is simulated using simple buoyancy and drag physics:
   - **buoyancy**: controlled by lung volume $V_{lung} \in [0, 1]$, which increases when the spacebar is held down (inhaling) and decreases when released (exhaling).
