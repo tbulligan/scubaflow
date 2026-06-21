@@ -34,9 +34,3 @@
 - [x] **High-Flow Environment Luminance Strobing**
   - Restrict full-screen background tint shifts and camera macro zoom thrusts exclusively to "Extreme Flow" operational modes (`this.scoreMultiplier >= 8`).
   - Ensure standard beat intervals (`this.currentBeatPulse`) only trigger localized illumination accents along the active depth zone boundaries (`terrainGraphics` strokes), keeping the center corridor completely clear for safe trajectory calculation.
-
-## 4. Level Selection UX & Architecture
-- [x] **Interactive Waveform Launchpad Card**
-  - Develop a pre-game landing page layout overlay that intercepts `window.customAudioBuffer` right after data loading.
-  - Read the downsampled mono data arrays from the buffer and draw a complete visual audio waveform preview across the file configuration wrapper.
-  - Provide immediate visual confirmation of the track's dynamic layout (density spikes, breakdown zones) before initializing the game countdown state.

@@ -4,59 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ScubaFlow — Neon Buoyancy Music Game</title>
-    <script>
-        // Redirect browser logs to server for analysis
-        (function() {
-            function sendLog(type, args) {
-                const message = Array.from(args).map(arg => {
-                    if (arg instanceof Error) {
-                        return arg.message + '\n' + arg.stack;
-                    } else if (typeof arg === 'object') {
-                        try {
-                            return JSON.stringify(arg);
-                        } catch (e) {
-                            return String(arg);
-                        }
-                    } else {
-                        return String(arg);
-                    }
-                }).join(' ');
 
-                fetch('/log', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ type: type, message: message })
-                }).catch(err => {});
-            }
-
-            const originalLog = console.log;
-            console.log = function() {
-                sendLog('log', arguments);
-                originalLog.apply(console, arguments);
-            };
-
-            const originalError = console.error;
-            console.error = function() {
-                sendLog('error', arguments);
-                originalError.apply(console, arguments);
-            };
-
-            const originalWarn = console.warn;
-            console.warn = function() {
-                sendLog('warn', arguments);
-                originalWarn.apply(console, arguments);
-            };
-
-            window.onerror = function(message, source, lineno, colno, error) {
-                sendLog('error', [`Global Error: ${message} at ${source}:${lineno}:${colno}`, error]);
-            };
-
-            window.addEventListener('unhandledrejection', function(event) {
-                sendLog('error', ['Unhandled Promise Rejection:', event.reason]);
-            });
-            console.log("Console redirection active.");
-        })();
-    </script>
     <meta name="description" content="An action-focused neon buoyancy music game where you control your depth purely with your spacebar and navigate challenging cave tunnels.">
 
     <!-- Favicon -->
@@ -382,25 +330,132 @@
             box-shadow: 0 0 8px var(--primary);
         }
 
-        .file-label {
-            display: block;
+        @keyframes neon-pulse {
+            0%, 100% {
+                text-shadow: 0 0 8px rgba(0, 240, 255, 0.2), 0 0 20px rgba(0, 240, 255, 0.1);
+            }
+            50% {
+                text-shadow: 0 0 15px rgba(0, 240, 255, 0.4), 0 0 30px rgba(189, 0, 255, 0.3);
+            }
+        }
+
+        .glow-title {
+            animation: neon-pulse 3s infinite ease-in-out;
+        }
+
+        /* Modern Info Grid for Instructions */
+        .info-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+            margin-bottom: 20px;
+            text-align: left;
+        }
+
+        .info-box {
             background: rgba(255, 255, 255, 0.02);
-            border: 1px dashed rgba(0, 240, 255, 0.25);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            padding: 16px;
+            border-radius: 16px;
+            transition: all 0.3s ease;
+            display: flex;
+            flex-direction: column;
+            justify-content: flex-start;
+        }
+
+        .info-box:hover {
+            background: rgba(255, 255, 255, 0.04);
+            border-color: rgba(0, 240, 255, 0.2);
+            box-shadow: inset 0 0 12px rgba(0, 240, 255, 0.03);
+        }
+
+        .info-box h4 {
+            font-size: 0.78rem;
+            font-weight: 700;
+            letter-spacing: 2px;
+            color: var(--primary);
+            margin-bottom: 10px;
+            text-transform: uppercase;
+            border-bottom: 1px solid rgba(0, 240, 255, 0.1);
+            padding-bottom: 6px;
+        }
+
+        .info-box p {
+            font-size: 0.78rem;
+            line-height: 1.45;
+            color: #94a3b8;
+            margin-bottom: 8px;
+        }
+
+        .info-box p:last-child {
+            margin-bottom: 0;
+        }
+
+        .control-key {
+            display: inline-block;
+            background: linear-gradient(135deg, rgba(255, 255, 255, 0.08) 0%, rgba(255, 255, 255, 0.03) 100%);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-bottom: 3px solid rgba(255, 255, 255, 0.25);
+            padding: 4px 12px;
+            border-radius: 6px;
+            font-family: 'Montserrat', sans-serif;
+            font-weight: 600;
+            font-size: 0.75rem;
+            letter-spacing: 1px;
+            color: #fff;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
+            margin: 6px 0;
+            width: fit-content;
+        }
+
+        .file-label {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            background: rgba(255, 255, 255, 0.015);
+            border: 2px dashed rgba(0, 240, 255, 0.2);
             color: #cbd5e1;
-            padding: 12px 20px;
-            border-radius: 12px;
+            padding: 20px;
+            border-radius: 16px;
             cursor: pointer;
             font-family: 'Outfit', sans-serif;
-            font-size: 0.85rem;
-            letter-spacing: 1px;
-            transition: all 0.2s ease;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
             text-align: center;
+            margin-bottom: 4px;
         }
 
         .file-label:hover {
             border-color: var(--primary);
             color: #fff;
             background: rgba(0, 240, 255, 0.04);
+            box-shadow: 0 0 20px rgba(0, 240, 255, 0.1);
+            transform: translateY(-1px);
+        }
+
+        .upload-icon {
+            font-size: 1.8rem;
+            margin-bottom: 8px;
+            filter: drop-shadow(0 0 6px var(--primary));
+            transition: transform 0.3s ease;
+        }
+
+        .file-label:hover .upload-icon {
+            transform: scale(1.15) rotate(-5deg);
+        }
+
+        .upload-title {
+            font-size: 0.88rem;
+            font-weight: 600;
+            letter-spacing: 1px;
+            margin-bottom: 4px;
+            text-transform: uppercase;
+        }
+
+        .upload-subtitle {
+            font-size: 0.72rem;
+            color: #64748b;
+            letter-spacing: 0.5px;
         }
 
         .menu-links {
@@ -445,68 +500,42 @@
         <!-- Interactive Start Overlay -->
         <div id="intro-screen">
             <div class="glass-card">
-                <h1>ScubaFlow</h1>
+                <h1 class="glow-title">ScubaFlow</h1>
                 <div class="subtitle">Neon Buoyancy Music Game</div>
                 
-                <div class="instructions">
-                    <h3>HOW TO PLAY:</h3>
-                    <p>⬆️ <strong>Spacebar (HOLD)</strong>: Increase buoyancy to rise up.</p>
-                    <p>⬇️ <strong>Spacebar (RELEASE)</strong>: Decrease buoyancy to sink down.</p>
-                    <p>💎 <strong>Collectibles</strong>: Align your path precisely with the neon debris. Auto-collect is disabled; gathering is a pure test of your buoyancy skills!</p>
-                    <p>🌫️ <strong>Avoid Silt-Outs</strong>: Colliding with the cave walls triggers a silt-out, blinding you and resetting your flow multiplier. Stay centered to maintain your flow!</p>
+                <div class="info-grid">
+                    <div class="info-box">
+                        <h4>BUOYANCY CONTROL</h4>
+                        <div class="control-key">SPACEBAR</div>
+                        <p><strong>HOLD</strong> to increase buoyancy & rise up ⬆️</p>
+                        <p><strong>RELEASE</strong> to decrease buoyancy & sink down ⬇️</p>
+                    </div>
+                    <div class="info-box">
+                        <h4>THE MISSION</h4>
+                        <p>💎 <strong>Collect Debris</strong>: Align precisely with neon collectibles (no auto-collect!).</p>
+                        <p>🌫️ <strong>Avoid Silt-Outs</strong>: Scraping cave walls blinds you and resets your score multiplier.</p>
+                    </div>
                 </div>
 
                 <div class="uploader-container">
-                    <label for="audio-file-input" class="file-label" id="file-label-text">
-                        🎵 UPLOAD MUSIC TRACK TO DIVE (.mp3, .wav, .ogg)
+                    <label for="audio-file-input" class="file-label" id="file-label-container">
+                        <div class="upload-icon">🎧</div>
+                        <div class="upload-title" id="file-label-text">Select Music Track to Dive</div>
+                        <div class="upload-subtitle">Supports .mp3, .wav, .ogg files</div>
                     </label>
                     <input type="file" id="audio-file-input" accept="audio/*" style="display:none;">
                 </div>
-
-                <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;">
-                    <div style="flex:1;height:1px;background:rgba(0,240,255,0.15);"></div>
-                    <span style="font-size:0.75rem;color:#64748b;letter-spacing:2px;">OR</span>
-                    <div style="flex:1;height:1px;background:rgba(0,240,255,0.15);"></div>
-                </div>
-
-                <div class="uploader-container" style="display:flex;gap:8px;">
-                    <input id="yt-url-input" type="text" placeholder="🎬 Paste YouTube URL…"
-                        style="flex:1;background:rgba(255,255,255,0.03);border:1px dashed rgba(189,0,255,0.3);color:#cbd5e1;
-                               padding:11px 16px;border-radius:12px;font-family:'Outfit',sans-serif;font-size:0.85rem;
-                               letter-spacing:1px;outline:none;transition:border-color 0.2s;"
-                        onfocus="this.style.borderColor='#bd00ff'" onblur="this.style.borderColor='rgba(189,0,255,0.3)'">
-                    <button id="btn-yt-load" type="button"
-                        style="background:linear-gradient(135deg,#bd00ff,#00f0ff);border:none;color:#fff;
-                               padding:11px 18px;border-radius:12px;font-family:'Outfit',sans-serif;font-size:0.8rem;
-                               font-weight:600;letter-spacing:1px;cursor:pointer;white-space:nowrap;transition:opacity 0.2s;"
-                        onmouseover="this.style.opacity='0.85'" onmouseout="this.style.opacity='1'">
-                        FETCH
-                    </button>
-                </div>
-                <div id="yt-status" style="font-size:0.75rem;color:#64748b;margin-bottom:12px;min-height:1em;text-align:center;"></div>
                 
                 <!-- Autopilot / Music Visualizer Switch -->
-                <div class="switch-container" style="margin-bottom: 8px;">
+                <div class="switch-container">
                     <span class="switch-label" id="autopilot-label">Autopilot (Music Visualizer Mode)</span>
                     <label class="toggle-switch" aria-labelledby="autopilot-label">
                         <input type="checkbox" id="autopilot-checkbox">
                         <span class="slider"></span>
                     </label>
                 </div>
-                <div style="font-size: 0.72rem; color: #94a3b8; opacity: 0.7; margin-bottom: 12px; text-transform: uppercase; letter-spacing: 1px;">
+                <div class="switch-hint">
                     Mutes game sounds to focus purely on your music track
-                </div>
-
-                <!-- Gameplay HUD Switch -->
-                <div class="switch-container" style="margin-bottom: 8px;">
-                    <span class="switch-label" id="hud-label">Show HUD during gameplay</span>
-                    <label class="toggle-switch" aria-labelledby="hud-label">
-                        <input type="checkbox" id="hud-checkbox">
-                        <span class="slider"></span>
-                    </label>
-                </div>
-                <div style="font-size: 0.72rem; color: #94a3b8; opacity: 0.7; margin-bottom: 20px; text-transform: uppercase; letter-spacing: 1px;">
-                    Displays track progress and duration in the upper-right corner
                 </div>
 
                 <button id="btn-dive" class="btn-dive" type="button" disabled style="opacity: 0.5; pointer-events: none;">Select a Music Track</button>
@@ -525,23 +554,19 @@
         window.selectedAvatar = 'diver';
         window.customAudioBuffer = null;
         window.useAutopilot = false;
-        window.showGameplayHUD = false;
 
-        window.showGameplayHUD = false;
 
         // Autopilot Switch Logic
         document.getElementById('autopilot-checkbox').addEventListener('change', (e) => {
             window.useAutopilot = e.target.checked;
         });
 
-        // HUD Switch Logic
-        document.getElementById('hud-checkbox').addEventListener('change', (e) => {
-            window.showGameplayHUD = e.target.checked;
-        });
+
 
         // Custom Audio Loading Logic
         const fileInput = document.getElementById('audio-file-input');
         const fileLabelText = document.getElementById('file-label-text');
+        const fileLabelContainer = document.getElementById('file-label-container');
         fileInput.addEventListener('change', (e) => {
             const file = e.target.files[0];
             if (file) {
@@ -551,8 +576,9 @@
                     window.customAudioBuffer = event.target.result; // Store as ArrayBuffer
                     window.customTrackName = file.name; // Store track name
                     fileLabelText.textContent = `✅ Loaded: ${file.name}`;
-                    fileLabelText.style.borderColor = '#00f0ff';
-                    fileLabelText.style.color = '#00f0ff';
+                    fileLabelContainer.style.borderColor = '#00f0ff';
+                    fileLabelContainer.style.color = '#00f0ff';
+                    fileLabelContainer.style.boxShadow = '0 0 15px rgba(0, 240, 255, 0.2)';
                     
                     // Enable the button!
                     const btn = document.getElementById('btn-dive');
@@ -565,52 +591,6 @@
             }
         });
 
-        // YouTube URL fetch handler
-        // Note: uses server-side yt-dlp proxy — for personal/local use only.
-        // YouTube ToS prohibits downloading; this is intended for tracks you own or have rights to.
-        document.getElementById('btn-yt-load').addEventListener('click', async () => {
-            const url = document.getElementById('yt-url-input').value.trim();
-            const status = document.getElementById('yt-status');
-            if (!url) { status.textContent = '⚠️ Paste a YouTube URL first.'; status.style.color = '#fb923c'; return; }
-            status.textContent = '⏳ Fetching audio via server… (may take 10–30s)';
-            status.style.color = '#94a3b8';
-            try {
-                const resp = await fetch('/yt-audio', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ url })
-                });
-                if (!resp.ok) {
-                    const err = await resp.text();
-                    status.textContent = `❌ Server error: ${err}`;
-                    status.style.color = '#f87171';
-                    return;
-                }
-                const arrayBuffer = await resp.arrayBuffer();
-                window.customAudioBuffer = arrayBuffer;
-                
-                // Parse clean track name from URL
-                let trackName = 'YouTube Audio';
-                try {
-                    let parsedUrl = new URL(url);
-                    let videoId = parsedUrl.searchParams.get('v');
-                    if (videoId) trackName = `YouTube Video (${videoId})`;
-                } catch(e) {}
-                window.customTrackName = trackName;
-                
-                status.textContent = '✅ Audio ready! Click Begin Dive.';
-                status.style.color = '#00f0ff';
-
-                const btn = document.getElementById('btn-dive');
-                btn.removeAttribute('disabled');
-                btn.style.opacity = '1';
-                btn.style.pointerEvents = 'auto';
-                btn.textContent = 'Begin Dive';
-            } catch (e) {
-                status.textContent = `❌ Fetch failed: ${e.message}`;
-                status.style.color = '#f87171';
-            }
-        });
 
         // Wire-up page start overlay trigger
         document.getElementById('btn-dive').addEventListener('click', () => {

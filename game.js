@@ -41,6 +41,28 @@ class ScubaFlowScene extends Phaser.Scene {
         super({ key: 'ScubaFlowScene' });
     }
 
+    hslToColorInt(h, s, l) {
+        let r, g, b;
+        if (s === 0) {
+            r = g = b = l; // achromatic
+        } else {
+            const hue2rgb = (p, q, t) => {
+                if (t < 0) t += 1;
+                if (t > 1) t -= 1;
+                if (t < 1/6) return p + (q - p) * 6 * t;
+                if (t < 1/2) return q;
+                if (t < 2/3) return p + (q - p) * (2/3 - t) * 6;
+                return p;
+            };
+            let q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+            let p = 2 * l - q;
+            r = hue2rgb(p, q, h + 1/3);
+            g = hue2rgb(p, q, h);
+            b = hue2rgb(p, q, h - 1/3);
+        }
+        return (Math.round(r * 255) << 16) | (Math.round(g * 255) << 8) | Math.round(b * 255);
+    }
+
     init() {
         // State Variables
         this.elapsedTime = 0; // ms
@@ -69,6 +91,7 @@ class ScubaFlowScene extends Phaser.Scene {
         this.lastProcessedBeatIdx = -1;
 
         // Visual Distortion Silt Mode
+        this.sActive = false; // renamed from siltActive to avoid search noise if needed, but wait, keeping same names:
         this.siltActive = false;
         this.siltTime = 0;
         this.siltDuration = 1800; // 1.8 seconds recovery distortion — shorter for playability
@@ -102,6 +125,12 @@ class ScubaFlowScene extends Phaser.Scene {
         this.targetEndX = 0;
         this.exhaleBubblesCount = 0;
         this.marineSnowMotes = [];
+
+        // Point Arrays pre-allocation for zero GC churn
+        this.floorPoints = [];
+        this.ceilPoints = [];
+        this.farPoints = [];
+        this.nearPoints = [];
     }
 
     preload() {
@@ -121,7 +150,7 @@ class ScubaFlowScene extends Phaser.Scene {
             ],
             collectibles: [],
             zones: [
-                { startTime: 0, endTime: 120000, targetDepth: 300, name: "Reef", floorColor: 0xbd00ff, ceilColor: 0x00f0ff, bgColor: 0x010410 }
+                { startTime: 0, endTime: 120000, targetDepth: 300, name: "Reef", floorColor: 0xbd00ff, ceilColor: 0x00f0ff, floorHue: 284, ceilHue: 184, bgColor: 0x010410 }
             ],
             beats: []
         };
@@ -163,16 +192,6 @@ class ScubaFlowScene extends Phaser.Scene {
             backgroundColor: 'rgba(2, 5, 20, 0.75)',
             padding: { x: 8, y: 4 }
         }).setOrigin(0.5).setDepth(20).setVisible(false);
-
-        // Create in-game progress HUD
-        this.progressHUD = this.add.text(1185, 15, "", {
-            fontFamily: 'Outfit',
-            fontSize: '15px',
-            color: '#cbd5e1',
-            fontStyle: 'bold',
-            backgroundColor: 'rgba(2, 5, 20, 0.45)',
-            padding: { x: 8, y: 4 }
-        }).setOrigin(1, 0).setDepth(100).setScrollFactor(0).setVisible(false);
 
         // 6. Setup Graphics layers
         this.parallaxFarGraphics = this.add.graphics().setDepth(-2).setScrollFactor(0);  // farthest layer (slowest) — screen-space so it tiles left correctly
@@ -357,74 +376,76 @@ class ScubaFlowScene extends Phaser.Scene {
         this.elapsedTime = 0;
         this.isPlaying = true; // allow update loop to render the starting scene
 
-        let countdownNumbers = ['3', '2', '1', 'FLOW!'];
-        let colors = ['#bd00ff', '#00f0ff', '#ff007f', '#00ff66'];
-        let index = 0;
+        this.showTrackStartOverlay(() => {
+            let countdownNumbers = ['3', '2', '1', 'FLOW!'];
+            let colors = ['#bd00ff', '#00f0ff', '#ff007f', '#00ff66'];
+            let index = 0;
 
-        let showNext = () => {
-            if (index < countdownNumbers.length) {
-                let numStr = countdownNumbers[index];
-                let colorHex = colors[index];
-                this.countdownText.setText(numStr);
-                this.countdownText.setColor(colorHex);
-                this.countdownText.setShadow(0, 0, colorHex, 30, true, true);
-                this.countdownText.setStroke(colorHex, 8);
-                this.countdownText.setScale(0.3);
-                this.countdownText.setAlpha(1);
+            let showNext = () => {
+                if (index < countdownNumbers.length) {
+                    let numStr = countdownNumbers[index];
+                    let colorHex = colors[index];
+                    this.countdownText.setText(numStr);
+                    this.countdownText.setColor(colorHex);
+                    this.countdownText.setShadow(0, 0, colorHex, 30, true, true);
+                    this.countdownText.setStroke(colorHex, 8);
+                    this.countdownText.setScale(0.3);
+                    this.countdownText.setAlpha(1);
 
-                // Play tick beep using Web Audio API AudioContext directly
-                try {
-                    let osc = ctx.createOscillator();
-                    let gainNode = ctx.createGain();
-                    osc.connect(gainNode);
-                    gainNode.connect(ctx.destination);
-                    osc.type = 'sine';
-                    if (numStr === 'FLOW!') {
-                        osc.frequency.setValueAtTime(440, ctx.currentTime);
-                        osc.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 0.25);
-                        gainNode.gain.setValueAtTime(0.15, ctx.currentTime);
-                        gainNode.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.4);
-                        osc.start();
-                        osc.stop(ctx.currentTime + 0.5);
-                    } else {
-                        osc.frequency.setValueAtTime(523.25, ctx.currentTime); // C5 note
-                        gainNode.gain.setValueAtTime(0.1, ctx.currentTime);
-                        gainNode.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.15);
-                        osc.start();
-                        osc.stop(ctx.currentTime + 0.2);
+                    // Play tick beep using Web Audio API AudioContext directly
+                    try {
+                        let osc = ctx.createOscillator();
+                        let gainNode = ctx.createGain();
+                        osc.connect(gainNode);
+                        gainNode.connect(ctx.destination);
+                        osc.type = 'sine';
+                        if (numStr === 'FLOW!') {
+                            osc.frequency.setValueAtTime(440, ctx.currentTime);
+                            osc.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 0.25);
+                            gainNode.gain.setValueAtTime(0.15, ctx.currentTime);
+                            gainNode.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.4);
+                            osc.start();
+                            osc.stop(ctx.currentTime + 0.5);
+                        } else {
+                            osc.frequency.setValueAtTime(523.25, ctx.currentTime); // C5 note
+                            gainNode.gain.setValueAtTime(0.1, ctx.currentTime);
+                            gainNode.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.15);
+                            osc.start();
+                            osc.stop(ctx.currentTime + 0.2);
+                        }
+                    } catch (e) {
+                        console.warn("Failed to play countdown beep:", e);
                     }
-                } catch (e) {
-                    console.warn("Failed to play countdown beep:", e);
+
+                    let stepDuration = numStr === 'FLOW!' ? 800 : 600;
+                    this.tweens.add({
+                        targets: this.countdownText,
+                        scale: 1.5,
+                        alpha: { from: 1, to: 0 },
+                        duration: stepDuration,
+                        ease: 'Cubic.easeOut',
+                        onComplete: () => {
+                            index++;
+                            showNext();
+                        }
+                    });
+                } else {
+                    this.countdownText.destroy();
+                    this.countdownActive = false;
+                    console.log("Countdown complete. Starting setupAudioEngine...");
+                    this.setupAudioEngine(ctx);
+                    console.log("setupAudioEngine completed.");
                 }
+            };
 
-                this.tweens.add({
-                    targets: this.countdownText,
-                    scale: 1.5,
-                    alpha: { from: 1, to: 0 },
-                    duration: 1000,
-                    ease: 'Cubic.easeOut',
-                    onComplete: () => {
-                        index++;
-                        showNext();
-                    }
-                });
-            } else {
-                this.countdownText.destroy();
-                this.countdownActive = false;
-                console.log("Countdown complete. Starting setupAudioEngine...");
-                this.setupAudioEngine(ctx);
-                console.log("setupAudioEngine completed.");
-                this.showTrackStartOverlay();
-            }
-        };
+            this.countdownText = this.add.text(600, 350, '', {
+                fontFamily: 'Outfit',
+                fontSize: '140px',
+                fontStyle: 'bold'
+            }).setOrigin(0.5).setDepth(100);
 
-        this.countdownText = this.add.text(600, 350, '', {
-            fontFamily: 'Outfit',
-            fontSize: '140px',
-            fontStyle: 'bold'
-        }).setOrigin(0.5).setDepth(100);
-
-        showNext();
+            showNext();
+        });
     }
 
     update(time, delta) {
@@ -721,7 +742,7 @@ class ScubaFlowScene extends Phaser.Scene {
                 let py = (this.siltSource === 'floor') ? floorY : ceilingY;
                 if (Math.random() < 0.65) { // probabilistic — not every frame, keeps it dramatic not suffocating
                     let siltHue = (this.baseHue + 180) % 360;
-                    let siltColor = Phaser.Display.Color.HSLToColor(siltHue / 360, 0.8, 0.45).color;
+                    let siltColor = this.hslToColorInt(siltHue / 360, 0.8, 0.45);
                     this.siltEmitter.particleTint = siltColor;
                     this.siltEmitter.emitParticleAt(
                         this.player.x - 40 + Math.random() * 80,
@@ -788,8 +809,8 @@ class ScubaFlowScene extends Phaser.Scene {
                 targetZoom += pulse * 0.005 * multiBeat;
             }
             
-            let bgColorObj = Phaser.Display.Color.HSLToColor(bgHue / 360, 0.7, lightnessBoost);
-            this.cameras.main.setBackgroundColor(bgColorObj.color);
+            let bgColorVal = this.hslToColorInt(bgHue / 360, 0.7, lightnessBoost);
+            this.cameras.main.setBackgroundColor(bgColorVal);
 
             // Camera micro-zoom throb on beats
             this.cameras.main.zoom = Phaser.Math.Linear(this.cameras.main.zoom, targetZoom, 0.15);
@@ -890,37 +911,13 @@ class ScubaFlowScene extends Phaser.Scene {
             // Update WebGL PostFX shader parameters (Chromatic Split)
             let fx = this.cameras.main.getPostPipeline(PsychedelicFX);
             if (fx) {
-                // Chromatic split decays in sync with silt time
-                if (this.siltActive && this.currentSiltDuration > 0) {
-                    fx.chromaticOffset = (fx.chromaticOffsetStart || 0.02) * Math.max(0, this.siltTime / this.currentSiltDuration);
-                } else {
-                    fx.chromaticOffset = 0;
-                }
+                // Chromatic split decays in sync with silt time, and scales with multiplier
+                let siltOffset = (this.siltActive && this.currentSiltDuration > 0)
+                    ? (fx.chromaticOffsetStart || 0.02) * Math.max(0, this.siltTime / this.currentSiltDuration)
+                    : 0;
+                let flowOffset = (this.scoreMultiplier - 1) * 0.0012; // amplify flow/speed at high multipliers
+                fx.chromaticOffset = siltOffset + flowOffset;
             }
-
-            // Update in-game progress HUD in upper-right corner
-            if (window.showGameplayHUD && !this.countdownActive && this.isPlaying && !this.isFadingOut && !this.isLevelCompleted) {
-                let trackName = window.customTrackName || "Track";
-                let elapsedSec = Math.floor(this.elapsedTime / 1000);
-                let durationSec = Math.floor(this.levelData.songLengthMs / 1000);
-                
-                let curMin = Math.floor(elapsedSec / 60);
-                let curSec = Math.floor(elapsedSec % 60);
-                let durMin = Math.floor(durationSec / 60);
-                let durSec = Math.floor(durationSec % 60);
-                
-                let progressStr = `${curMin}:${curSec.toString().padStart(2, '0')} / ${durMin}:${durSec.toString().padStart(2, '0')}`;
-                
-                let currentZone = this.getCurrentDepthZone();
-                let colorStr = currentZone ? Phaser.Display.Color.IntegerToColor(currentZone.ceilColor).toCSS() : '#00f0ff';
-                
-                this.progressHUD.setText(`${trackName.toUpperCase()} | ${progressStr}`);
-                this.progressHUD.setColor(colorStr);
-                this.progressHUD.setVisible(true);
-            } else {
-                this.progressHUD.setVisible(false);
-            }
-
             // Score multiplier logic (avoiding silt-outs increases multiplier dynamically)
             if (!this.siltActive) {
                 this.siltFreeTime += deltaMs;
@@ -1120,7 +1117,7 @@ class ScubaFlowScene extends Phaser.Scene {
         if (!spaceDown && this.V_lung > 0.05) {
             if (Math.random() < 0.20) {
                 let rndHue = (this.baseHue + Math.random() * 60) % 360;
-                let bubbleColor = Phaser.Display.Color.HSLToColor(rndHue / 360, 1.0, 0.65).color;
+                let bubbleColor = this.hslToColorInt(rndHue / 360, 1.0, 0.65);
                 this.bubbleEmitter.particleTint = bubbleColor;
                 this.bubbleEmitter.emitParticleAt(this.player.x + 18, this.player.y - 4);
                 this.exhaleBubblesCount++;
@@ -1143,7 +1140,7 @@ class ScubaFlowScene extends Phaser.Scene {
 
     emitExhaleBubbles(x, y) {
         let rndHue = (this.baseHue + Math.random() * 40) % 360;
-        let bColor = Phaser.Display.Color.HSLToColor(rndHue / 360, 0.7, 0.85).color;
+        let bColor = this.hslToColorInt(rndHue / 360, 0.7, 0.85);
         this.bubbleEmitter.particleTint = bColor;
         for (let i = 0; i < 3; i++) {
             this.bubbleEmitter.emitParticleAt(
@@ -1209,16 +1206,24 @@ class ScubaFlowScene extends Phaser.Scene {
         let baseLum = this.siltActive ? 0.15 : Math.min(0.55, 0.25 + multiFactor * 0.043);
         let baseAlpha = this.siltActive ? 0.08 : Math.min(0.55, 0.18 + multiFactor * 0.053);
 
-        const getCaveY = (worldX) => {
+        const getCaveFloorY = (worldX) => {
             let t = (worldX / this.baseScrollSpeed) * 1000;
             let pathY = this.getTargetYAtTime(t);
             let energy = this.getEnergyAtTime(t);
             let bOff = Math.max(65, 85 - energy * 30);
             let jag = 0.5 + energy * 1.5;
             let bPulse = (this.currentBeatPulse || 0) * 15 * (0.8 + energy);
-            let floorY = pathY + Math.max(68, bOff + (Math.cos(worldX * 0.015) * 10 + Math.sin(worldX * 0.04) * 5) * jag) + bPulse;
-            let ceilY = pathY - Math.max(68, bOff + (Math.sin(worldX * 0.02) * 10 + Math.cos(worldX * 0.05) * 5) * jag) - bPulse;
-            return { floorY, ceilY };
+            return pathY + Math.max(68, bOff + (Math.cos(worldX * 0.015) * 10 + Math.sin(worldX * 0.04) * 5) * jag) + bPulse;
+        };
+
+        const getCaveCeilY = (worldX) => {
+            let t = (worldX / this.baseScrollSpeed) * 1000;
+            let pathY = this.getTargetYAtTime(t);
+            let energy = this.getEnergyAtTime(t);
+            let bOff = Math.max(65, 85 - energy * 30);
+            let jag = 0.5 + energy * 1.5;
+            let bPulse = (this.currentBeatPulse || 0) * 15 * (0.8 + energy);
+            return pathY - Math.max(68, bOff + (Math.sin(worldX * 0.02) * 10 + Math.cos(worldX * 0.05) * 5) * jag) - bPulse;
         };
 
         // flowFill: 0 at multiplier x1 (wireframe), 1 at multiplier x8 (full solid neon) - gradual power curve
@@ -1233,7 +1238,7 @@ class ScubaFlowScene extends Phaser.Scene {
         // Far layer: noticeably dimmer luminosity and capped alpha
         let farLum = Math.max(0.05, baseLum - 0.12);
         let farAlpha = baseAlpha * 0.45; // clearly fainter than near
-        let farColor = Phaser.Display.Color.HSLToColor(farHue / 360, baseSat * 0.8, farLum).color;
+        let farColor = this.hslToColorInt(farHue / 360, baseSat * 0.8, farLum);
         fg.lineStyle(1.0, farColor, farAlpha);
 
         let farFactor = 0.10;
@@ -1243,20 +1248,18 @@ class ScubaFlowScene extends Phaser.Scene {
         let farCount = Math.ceil(screenW / farSpacing) + 2;
 
         // Solid far-layer rock: continuous ceiling and floor bands behind stalactites/stalagmites
-        // Drawn first so the speleothems appear to protrude from them.
-        // Ceiling band: from top of screen down to stalCeil line (per-tile sampled at ~60px spacing)
+        // Ceiling band: fill from screen top to cave ceiling profile
         fg.fillStyle(farColor, farAlpha * 0.55 + flowFill * 0.25);
         fg.lineStyle(1.0, farColor, farAlpha * 0.7);
         {
             let bStep = 60;
             let bCount = Math.ceil(screenW / bStep) + 2;
-            // Ceiling band: fill from screen top to cave ceiling profile
             fg.beginPath();
             let bFirst = true;
             for (let nb = -1; nb <= bCount; nb++) {
                 let bsx = nb * bStep - (camX * farFactor) % bStep;
                 let bwx = bsx + camX;
-                let { ceilY: bc } = getCaveY(bwx);
+                let bc = getCaveCeilY(bwx);
                 if (bFirst) { fg.moveTo(bsx, -50); fg.lineTo(bsx, bc); bFirst = false; }
                 else { fg.lineTo(bsx, bc); }
             }
@@ -1273,7 +1276,7 @@ class ScubaFlowScene extends Phaser.Scene {
             for (let nb = -1; nb <= bCount; nb++) {
                 let bsx = nb * bStep - (camX * farFactor) % bStep;
                 let bwx = bsx + camX;
-                let { floorY: bf } = getCaveY(bwx);
+                let bf = getCaveFloorY(bwx);
                 if (bFirst) { fg.moveTo(bsx, 750); fg.lineTo(bsx, bf); bFirst = false; }
                 else { fg.lineTo(bsx, bf); }
             }
@@ -1292,7 +1295,8 @@ class ScubaFlowScene extends Phaser.Scene {
 
             // Each shape anchors to its own x for correct cave profile
             let worldX = sx + camX;
-            let { floorY: stalCeilFloor, ceilY: stalCeil } = getCaveY(worldX);
+            let stalCeilFloor = getCaveFloorY(worldX);
+            let stalCeil = getCaveCeilY(worldX);
             let channelH = stalCeilFloor - stalCeil;
             let maxH = Math.max(10, (channelH - 30) * 0.55); // leave ≥30px gap between tips
             let stalH = Math.min(maxH, 60 + Math.sin(i * 2.1) * 40);
@@ -1303,12 +1307,12 @@ class ScubaFlowScene extends Phaser.Scene {
             fg.fillStyle(farColor, Math.max(farAlpha * 0.6, farAlpha * flowFill));
             fg.lineStyle(1.0, farColor, farAlpha);
 
-            // Stalactite — triangle hanging from ceiling, rooted at the solid band (buried deep to hide base edge)
+            // Stalactite
             fg.beginPath();
             fg.moveTo(sx - hw, stalCeil - 60); fg.lineTo(sx + hw, stalCeil - 60); fg.lineTo(sx, stalCeil + stalH); fg.closePath();
             fg.fillPath(); fg.strokePath();
 
-            // Stalagmite — rooted at floor solid band (buried deep to hide base edge)
+            // Stalagmite
             let stagW = Math.max(6, hw * 1.3 + Math.sin(i * 2.9) * 4);
             fg.fillRect(sx - stagW, stalCeilFloor - stagH, stagW * 2, stagH + 60);
             fg.strokeRect(sx - stagW, stalCeilFloor - stagH, stagW * 2, stagH + 60);
@@ -1319,7 +1323,7 @@ class ScubaFlowScene extends Phaser.Scene {
         let ng = this.parallaxNearGraphics;
         ng.clear();
         let nearHue = (this.baseHue + 110) % 360;
-        let nearColor = Phaser.Display.Color.HSLToColor(nearHue / 360, Math.min(1, baseSat * 1.4), Math.min(0.65, baseLum + 0.08)).color;
+        let nearColor = this.hslToColorInt(nearHue / 360, Math.min(1, baseSat * 1.4), Math.min(0.65, baseLum + 0.08));
         let nearStrokeAlpha = baseAlpha * 1.4;
         ng.lineStyle(2, nearColor, nearStrokeAlpha);
 
@@ -1341,7 +1345,7 @@ class ScubaFlowScene extends Phaser.Scene {
             for (let nb = 0; nb <= nCount; nb++) {
                 let nwx = nBase + nb * nStep;
                 let nsx = nwx + camX * (1 - nearFactor);
-                let { ceilY: nc } = getCaveY(nsx);
+                let nc = getCaveCeilY(nsx);
                 if (nFirst) { ng.moveTo(nsx, -50); ng.lineTo(nsx, nc); nFirst = false; }
                 else { ng.lineTo(nsx, nc); }
             }
@@ -1357,7 +1361,7 @@ class ScubaFlowScene extends Phaser.Scene {
             for (let nb = 0; nb <= nCount; nb++) {
                 let nwx = nBase + nb * nStep;
                 let nsx = nwx + camX * (1 - nearFactor);
-                let { floorY: nf } = getCaveY(nsx);
+                let nf = getCaveFloorY(nsx);
                 if (nFirst) { ng.moveTo(nsx, 750); ng.lineTo(nsx, nf); nFirst = false; }
                 else { ng.lineTo(nsx, nf); }
             }
@@ -1374,7 +1378,8 @@ class ScubaFlowScene extends Phaser.Scene {
             sx += Math.sin(i * 5.1) * 60;
 
             // Anchor each shape to its own screen x for correct cave profile
-            let { floorY: nearFloor, ceilY: nearCeil } = getCaveY(sx);
+            let nearFloor = getCaveFloorY(sx);
+            let nearCeil = getCaveCeilY(sx);
             let channelH = nearFloor - nearCeil;
             let maxH = Math.max(10, (channelH - 30) * 0.55); // leave ≥30px gap between tips
             let stalH = Math.min(maxH, 85 + Math.sin(i * 1.7) * 55);
@@ -1384,12 +1389,13 @@ class ScubaFlowScene extends Phaser.Scene {
             // Fill alpha driven by flow level — 0 = wireframe, 1 = solid neon
             ng.fillStyle(nearColor, Math.max(nearStrokeAlpha * 0.5, nearStrokeAlpha * flowFill));
 
-            // Stalactite — rooted in the solid ceiling band (buried deep to hide base edge)
+            // Stalactite
             ng.beginPath();
-            ng.moveTo(sx - hw, nearCeil - 80); ng.lineTo(sx + hw, nearCeil - 80); ng.lineTo(sx, nearCeil + stalH); ng.closePath();
+            ng.moveTo(sx - hw, nearCeil - 80); ng.lineTo(sx + hw, nearCeil - 80); ng.lineTo(sx, nearCeil + stalH);
+            ng.closePath();
             ng.fillPath(); ng.strokePath();
 
-            // Stalagmite — rooted in the solid floor band (buried deep to hide base edge)
+            // Stalagmite
             let stagW = Math.max(8, hw * 1.3 + Math.sin(i * 3.1) * 5);
             ng.fillRect(sx - stagW, nearFloor - stagH, stagW * 2, stagH + 80);
             ng.strokeRect(sx - stagW, nearFloor - stagH, stagW * 2, stagH + 80);
@@ -1480,8 +1486,8 @@ class ScubaFlowScene extends Phaser.Scene {
         let flowLightBoost = this.siltActive ? -0.15 : Math.min(0.12, (this.scoreMultiplier - 1) * 0.017);
 
         let playerHue = (this.baseHue + 320) % 360; // Pink/Magenta base (distinct from buddy)
-        let mainColor = Phaser.Display.Color.HSLToColor(playerHue / 360, flowSat, 0.55 + flowLightBoost).color;
-        let accentColor = Phaser.Display.Color.HSLToColor(((playerHue + 130) % 360) / 360, flowSat, 0.6 + flowLightBoost).color; // Neon Green/Yellow
+        let mainColor = this.hslToColorInt(playerHue / 360, flowSat, 0.55 + flowLightBoost);
+        let accentColor = this.hslToColorInt(((playerHue + 130) % 360) / 360, flowSat, 0.6 + flowLightBoost); // Neon Green/Yellow
 
         if (this.avatarType === 'diver') {
             let glowRadius = 20 + this.V_lung * 8 + pulse * 8 + (this.scoreMultiplier - 1) * 4;
@@ -1493,7 +1499,7 @@ class ScubaFlowScene extends Phaser.Scene {
             let auraLevels = Math.min(this.scoreMultiplier - 1, 7);
             for (let a = 0; a < auraLevels; a++) {
                 let auraHue = (this.baseHue + a * 75) % 360;
-                let auraColor = Phaser.Display.Color.HSLToColor(auraHue / 360, 1.0, 0.65).color;
+                let auraColor = this.hslToColorInt(auraHue / 360, 1.0, 0.65);
                 // Each ring pulses with beat, offset phase per ring
                 let auraPhase = (this.elapsedTime * 0.003 + a * 0.8) % (Math.PI * 2);
                 let auraR = 32 + a * 18 + pulse * (10 + a * 5) + Math.sin(auraPhase) * 5;
@@ -1764,7 +1770,7 @@ class ScubaFlowScene extends Phaser.Scene {
             g.strokeEllipse(0, 0, shellWidth - 8, shellHeight - 6);
 
             g.lineStyle(1.5, mainColor, 1);
-            g.fillStyle(0x020514, 0.9);
+            g.fillStyle(0x020514, 0.95);
             g.fillCircle(shellWidth / 2 + 4, 0, 5);
             g.strokeCircle(shellWidth / 2 + 4, 0, 5);
 
@@ -1825,8 +1831,8 @@ class ScubaFlowScene extends Phaser.Scene {
 
         // Cycle the buddy neon color (complementary hue)
         let buddyHue = (this.baseHue + 180) % 360; // Cyan base (distinct from player)
-        let mainColor = Phaser.Display.Color.HSLToColor(buddyHue / 360, flowSat, 0.55 + flowLightBoost).color;
-        let accentColor = Phaser.Display.Color.HSLToColor(((buddyHue + 100) % 360) / 360, flowSat, 0.6 + flowLightBoost).color; // Violet/Orange
+        let mainColor = this.hslToColorInt(buddyHue / 360, flowSat, 0.55 + flowLightBoost);
+        let accentColor = this.hslToColorInt(((buddyHue + 100) % 360) / 360, flowSat, 0.6 + flowLightBoost); // Violet/Orange
 
         // Pure wireframe styling: buddy has a translucent glowing aura, but body parts are line-only
         g.fillStyle(mainColor, 0.04);
@@ -1963,7 +1969,7 @@ class ScubaFlowScene extends Phaser.Scene {
         let handY = elbowY;
 
         if (this.buddyState === 'assisting') {
-            // Raise arm to make "OK" hand signal inquiring
+            // Raise arm to make "OK" hand signal
             elbowX = shoulderX + 4;
             elbowY = shoulderY - 8;
             handX = elbowX + 6;
@@ -2016,24 +2022,26 @@ class ScubaFlowScene extends Phaser.Scene {
         if (!this.player || !this.buddy) return;
 
         let playerHue = (this.baseHue + 320) % 360;
-        let pAccent = Phaser.Display.Color.HSLToColor(((playerHue + 130) % 360) / 360, 1.0, 0.65).color;
+        let pHue = ((playerHue + 130) % 360) / 360;
+        let pAccent = this.hslToColorInt(pHue, 1.0, 0.65);
 
         let buddyHue = (this.baseHue + 180) % 360;
-        let bAccent = Phaser.Display.Color.HSLToColor(((buddyHue + 100) % 360) / 360, 1.0, 0.65).color;
+        let bHue = ((buddyHue + 100) % 360) / 360;
+        let bAccent = this.hslToColorInt(bHue, 1.0, 0.65);
 
         // Player Light (hand is at 26, -2 relative to player container)
         let pHandX = this.player.x + 26;
         let pHandY = this.player.y - 2;
-        this.drawDiveLight(g, pHandX, pHandY, 1, 0xffffff, pAccent);
+        this.drawDiveLight(g, pHandX, pHandY, 1, 0xffffff, pAccent, pHue);
 
         // Buddy Light (hand is at 26, -2 relative to buddy container, scaled by scaleX)
         let bDir = this.buddy.scaleX; // 1 or -1
         let bHandX = this.buddy.x + 26 * bDir;
         let bHandY = this.buddy.y - 2;
-        this.drawDiveLight(g, bHandX, bHandY, bDir, 0xffffff, bAccent);
+        this.drawDiveLight(g, bHandX, bHandY, bDir, 0xffffff, bAccent, bHue);
     }
 
-    drawDiveLight(g, x0, y0, dir, mainColor, accentColor) {
+    drawDiveLight(g, x0, y0, dir, mainColor, accentColor, hueVal) {
         let beamLength = 320;
         let beamSpread = 75;
         let steps = 30;
@@ -2042,7 +2050,7 @@ class ScubaFlowScene extends Phaser.Scene {
         let flowSat = this.siltActive ? 0.15 : Math.min(1.0, 0.45 + (this.scoreMultiplier - 1) * 0.08);
         let flowLightBoost = this.siltActive ? -0.15 : Math.min(0.12, (this.scoreMultiplier - 1) * 0.017);
 
-        let lightCol = Phaser.Display.Color.HSLToColor(Phaser.Display.Color.IntegerToColor(accentColor).h, flowSat, 0.65 + flowLightBoost).color;
+        let lightCol = this.hslToColorInt(hueVal, flowSat, 0.65 + flowLightBoost);
 
         let topPoints = [];
         let bottomPoints = [];
@@ -2182,8 +2190,8 @@ class ScubaFlowScene extends Phaser.Scene {
         g.clear();
 
         let activeZone = this.getCurrentDepthZone();
-        let baseFloorHue = activeZone ? (Phaser.Display.Color.IntegerToColor(activeZone.floorColor).h * 360) : 280;
-        let baseCeilHue = activeZone ? (Phaser.Display.Color.IntegerToColor(activeZone.ceilColor).h * 360) : 180;
+        let baseFloorHue = activeZone ? (activeZone.floorHue !== undefined ? activeZone.floorHue : Phaser.Display.Color.IntegerToColor(activeZone.floorColor).h * 360) : 280;
+        let baseCeilHue = activeZone ? (activeZone.ceilHue !== undefined ? activeZone.ceilHue : Phaser.Display.Color.IntegerToColor(activeZone.ceilColor).h * 360) : 180;
 
         let floorHue = (baseFloorHue + this.baseHue * 0.5) % 360;
         let ceilHue = (baseCeilHue + this.baseHue * 0.5) % 360;
@@ -2198,8 +2206,8 @@ class ScubaFlowScene extends Phaser.Scene {
         // At high flow, walls use full neon saturation; at low flow, muted
         let wallSat = this.siltActive ? 0.15 : Math.min(1.0, flowSat + flowFill * 0.3);
         let wallLum = Math.min(0.60, (0.42 + flowLightBoost) + flowFill * 0.08);
-        let floorColor = Phaser.Display.Color.HSLToColor(floorHue / 360, wallSat, wallLum).color;
-        let ceilColor = Phaser.Display.Color.HSLToColor(ceilHue / 360, wallSat, wallLum).color;
+        let floorColor = this.hslToColorInt(floorHue / 360, wallSat, wallLum);
+        let ceilColor = this.hslToColorInt(ceilHue / 360, wallSat, wallLum);
 
         let startX = this.cameras.main.scrollX - 100;
         let endX = startX + 1400;
@@ -2213,14 +2221,24 @@ class ScubaFlowScene extends Phaser.Scene {
             return { floorY: targetY + floorOffset, ceilY: targetY - ceilOffset };
         };
 
-        // Generate base points (without openings merged, so cave walls are smooth/continuous again)
-        let floorPoints = [];
-        let ceilPoints = [];
+        // Generate base points with zero allocation GC cache
+        let idx = 0;
         for (let x = startX; x <= endX; x += 30) {
             let { floorY, ceilY } = getWallY(x);
-            floorPoints.push({ x: x, y: floorY });
-            ceilPoints.push({ x: x, y: ceilY });
+            if (!this.floorPoints[idx]) {
+                this.floorPoints[idx] = { x: 0, y: 0 };
+                this.ceilPoints[idx] = { x: 0, y: 0 };
+            }
+            this.floorPoints[idx].x = x;
+            this.floorPoints[idx].y = floorY;
+            this.ceilPoints[idx].x = x;
+            this.ceilPoints[idx].y = ceilY;
+            idx++;
         }
+        this.floorPoints.length = idx;
+        this.ceilPoints.length = idx;
+        let floorPoints = this.floorPoints;
+        let ceilPoints = this.ceilPoints;
 
         let pulse = this.currentBeatPulse || 0;
         let lineWidth = 1.5 + pulse * 2.0 + flowFill * 1.0; // thicker stroke at high flow
@@ -2303,10 +2321,9 @@ class ScubaFlowScene extends Phaser.Scene {
                 let cx = slot * SLOT_SIZE + this._seededRnd(seed + 1) * SLOT_SIZE * 0.9 - SLOT_SIZE * 0.45;
                 let { floorY } = getWallY(cx);
 
-                // Map specific particle emission anchor points to floor crack offsets (active during countdown & dynamic scaling)
                 if (this.plumeEmitter && this._seededRnd(seed + 12) < 0.4) {
                     let plumeHue = (floorHue + 20) % 360;
-                    let plumeColor = Phaser.Display.Color.HSLToColor(plumeHue / 360, 0.9, 0.6).color;
+                    let plumeColor = this.hslToColorInt(plumeHue / 360, 0.9, 0.6);
                     
                     // Dynamic scaling of vents based on Flow multiplier
                     let mult = this.scoreMultiplier || 1;
@@ -2315,20 +2332,15 @@ class ScubaFlowScene extends Phaser.Scene {
                     let ventAlpha = 0.06 + (mult - 1) * 0.02;    // x1: 0.06, x8: 0.20
                     let emitChance = 0.06 + (mult - 1) * 0.02;    // x1: 0.06, x8: 0.20
                     
-                    this.plumeEmitter.particleTint = plumeColor;
-                    if (this.plumeEmitter.scaleX) {
-                        this.plumeEmitter.scaleX.start = ventScaleStart;
-                        this.plumeEmitter.scaleX.end = ventScaleEnd;
-                        this.plumeEmitter.scaleY.start = ventScaleStart;
-                        this.plumeEmitter.scaleY.end = ventScaleEnd;
-                    }
-                    if (this.plumeEmitter.alpha) {
-                        this.plumeEmitter.alpha.start = ventAlpha;
-                        this.plumeEmitter.alpha.end = 0;
-                    }
-                    
                     if (Math.random() < emitChance) {
-                        this.plumeEmitter.emitParticleAt(cx, floorY);
+                        this.plumeEmitter.emitParticleAt(cx, floorY, 1, {
+                            tint: plumeColor,
+                            scale: { start: ventScaleStart, end: ventScaleEnd },
+                            alpha: { start: Math.min(0.9, ventAlpha * 5.5), end: 0 }, // 5.5x multiplier for visibility
+                            lifespan: { min: 1800, max: 2800 },
+                            speedY: { min: -150, max: -70 },
+                            speedX: { min: -this.scrollSpeed * 0.5 - 15, max: -this.scrollSpeed * 0.5 + 15 }
+                        });
                     }
                 }
 
@@ -2462,7 +2474,7 @@ class ScubaFlowScene extends Phaser.Scene {
         }
 
         // --- Draw Wall Openings (cracks & windows as overlays on top of the terrain) ---
-        this.drawWallOpenings(g, startX, endX, floorPoints, ceilPoints, floorColor, ceilColor, flowFill, flowSat, flowLightBoost);
+        this.drawWallOpenings(g, startX, endX, floorPoints, ceilPoints, floorColor, ceilColor, flowFill, flowSat, flowLightBoost, floorHue, ceilHue);
 
         // Draw cave safety line guideline attached to buddy's reel
         this.drawGuideLine();
@@ -2510,7 +2522,7 @@ class ScubaFlowScene extends Phaser.Scene {
         };
     }
 
-    drawWallOpenings(g, startX, endX, floorPoints, ceilPoints, floorColor, ceilColor, flowFill, flowSat, flowLightBoost) {
+    drawWallOpenings(g, startX, endX, floorPoints, ceilPoints, floorColor, ceilColor, flowFill, flowSat, flowLightBoost, floorHue, ceilHue) {
         const SLOT_SIZE = 320; // world-px between opening-slot centres
         const OPEN_CHANCE = 0.55; // probability a slot has an opening
         const WIN_EVERY = 5;  // every Nth opening is a "depth window"
@@ -2518,24 +2530,13 @@ class ScubaFlowScene extends Phaser.Scene {
         let wallSat = this.siltActive ? 0.15 : Math.min(1.0, flowSat + flowFill * 0.3);
         let wallLum = Math.min(0.75, 0.5 + flowFill * 0.15);
 
-        // Helper: get floor/ceil Y at an arbitrary worldX by interpolating the pre-built arrays
-        const getWallY = (wx) => {
-            let t = (wx / this.baseScrollSpeed) * 1000;
-            let targetY = this.getTargetYAtTime(t);
-            let energy = this.getEnergyAtTime(t);
-            let { floorOffset, ceilOffset } = this.getWallOffsets(wx, energy);
-            let floorY = targetY + floorOffset;
-            let ceilY = targetY - ceilOffset;
-            return { floorY, ceilY };
-        };
-
         // Far-parallax background colour used for depth-window fill
         let farHue = (this.baseHue + 200) % 360;
         let farAlpha = Math.min(0.55, 0.18 + (this.scoreMultiplier - 1) * 0.053) * 0.45;
         let farLum = Math.max(0.05, (this.siltActive ? 0.15 : Math.min(0.55, 0.25 + (this.scoreMultiplier - 1) * 0.043)) - 0.12);
-        let farColor = Phaser.Display.Color.HSLToColor(farHue / 360,
+        let farColor = this.hslToColorInt(farHue / 360,
             (this.siltActive ? 0.05 : Math.min(0.85, 0.25 + (this.scoreMultiplier - 1) * 0.086)) * 0.8,
-            farLum).color;
+            farLum);
 
         let firstSlot = Math.floor(startX / SLOT_SIZE);
         let lastSlot = Math.ceil(endX / SLOT_SIZE);
@@ -2555,13 +2556,16 @@ class ScubaFlowScene extends Phaser.Scene {
             let ow = 28 + this._seededRnd(slot * 41 + 1) * (isWindow ? 55 : 35);
             let od = 28 + this._seededRnd(slot * 53 + 5) * (isWindow ? 70 : 40);
 
-            let { floorY, ceilY } = getWallY(cx);
+            let t = (cx / this.baseScrollSpeed) * 1000;
+            let targetY = this.getTargetYAtTime(t);
+            let energy = this.getEnergyAtTime(t);
+            let { floorOffset, ceilOffset } = this.getWallOffsets(cx, energy);
+            let floorY = targetY + floorOffset;
+            let ceilY = targetY - ceilOffset;
 
             // Rock color for this opening's rim
-            let rimHue = onFloor
-                ? ((Phaser.Display.Color.IntegerToColor(floorColor).h * 360 + this.baseHue * 0.5) % 360)
-                : ((Phaser.Display.Color.IntegerToColor(ceilColor).h * 360 + this.baseHue * 0.5) % 360);
-            let rimColor = Phaser.Display.Color.HSLToColor(rimHue / 360, wallSat, wallLum).color;
+            let rimHue = onFloor ? floorHue : ceilHue;
+            let rimColor = this.hslToColorInt(rimHue / 360, wallSat, wallLum);
 
             if (onFloor) {
                 // Crack / side-tunnel opening IN the floor wall
@@ -2880,7 +2884,7 @@ class ScubaFlowScene extends Phaser.Scene {
             });
 
             let siltHue = (this.baseHue + 180) % 360;
-            let siltColor = Phaser.Display.Color.HSLToColor(siltHue / 360, 0.8, 0.45).color;
+            let siltColor = this.hslToColorInt(siltHue / 360, 0.8, 0.45);
             siltE.particleTint = siltColor;
 
             siltE.explode();
@@ -2898,9 +2902,9 @@ class ScubaFlowScene extends Phaser.Scene {
             let phase = this.siltTime / (this.currentSiltDuration || this.siltDuration);
 
             let siltHue = (this.baseHue + 180) % 360;
-            let colorObj = Phaser.Display.Color.HSLToColor(siltHue / 360, 0.75, 0.25);
+            let siltColorVal = this.hslToColorInt(siltHue / 360, 0.75, 0.25);
 
-            this.siltVignetteImage.setTint(colorObj.color);
+            this.siltVignetteImage.setTint(siltColorVal);
             this.siltVignetteImage.setAlpha(Math.min(0.95, phase * 1.4));
             this.siltVignetteImage.setVisible(true);
         } else {
@@ -3202,7 +3206,7 @@ class ScubaFlowScene extends Phaser.Scene {
         }, 2000);
     }
 
-    showTrackStartOverlay() {
+    showTrackStartOverlay(onCompleteCallback) {
         let trackName = window.customTrackName || "Unknown Track";
         let durationMs = this.levelData.songLengthMs || 0;
         let minutes = Math.floor(durationMs / 60000);
@@ -3210,7 +3214,7 @@ class ScubaFlowScene extends Phaser.Scene {
         let durationStr = `${minutes}:${seconds.toString().padStart(2, '0')}`;
 
         let currentZone = this.getCurrentDepthZone();
-        let colorStr = currentZone ? Phaser.Display.Color.IntegerToColor(currentZone.ceilColor).toCSS() : '#00f0ff';
+        let colorStr = currentZone ? '#' + currentZone.ceilColor.toString(16).padStart(6, '0') : '#00f0ff';
 
         let infoText = this.add.text(600, 260, `TRACK: ${trackName.toUpperCase()}`, {
             fontFamily: 'Outfit',
@@ -3230,17 +3234,20 @@ class ScubaFlowScene extends Phaser.Scene {
         this.tweens.add({
             targets: [infoText, durationText],
             alpha: 1,
-            duration: 800,
+            duration: 500,
             ease: 'Power2',
             onComplete: () => {
-                this.time.delayedCall(2200, () => {
+                this.time.delayedCall(1000, () => {
                     this.tweens.add({
                         targets: [infoText, durationText],
                         alpha: 0,
-                        duration: 800,
+                        duration: 500,
                         onComplete: () => {
                             infoText.destroy();
                             durationText.destroy();
+                            if (onCompleteCallback) {
+                                onCompleteCallback();
+                            }
                         }
                     });
                 });
@@ -3759,6 +3766,8 @@ class ScubaFlowScene extends Phaser.Scene {
             }
             let avgDepth = countY > 0 ? (sumY / countY) : 300;
 
+            let fHue = Phaser.Display.Color.IntegerToColor(zoneColors[z].floor).h * 360;
+            let cHue = Phaser.Display.Color.IntegerToColor(zoneColors[z].ceil).h * 360;
             zones.push({
                 startTime: startTime,
                 endTime: endTime,
@@ -3766,6 +3775,8 @@ class ScubaFlowScene extends Phaser.Scene {
                 name: zoneNames[z],
                 floorColor: zoneColors[z].floor,
                 ceilColor: zoneColors[z].ceil,
+                floorHue: fHue,
+                ceilHue: cHue,
                 bgColor: zoneColors[z].bg
             });
         }
@@ -3889,10 +3900,10 @@ class ScubaFlowScene extends Phaser.Scene {
         // Test 5: Buoyancy range
         let testSmoothRise = 1.0;
         let testSmoothSink = 0.0;
-        let riseAy = (testSmoothRise - 0.5) * -600;
-        let sinkAy = (testSmoothSink - 0.5) * -600;
-        console.assert(riseAy === -300, `Assertion Failed: Expect rise acceleration -300, got ${riseAy}`);
-        console.assert(sinkAy === 300, `Assertion Failed: Expect sink acceleration 300, got ${sinkAy}`);
+        let riseAy = (testSmoothRise - 0.5) * -640;
+        let sinkAy = (testSmoothSink - 0.5) * -640;
+        console.assert(riseAy === -320, `Assertion Failed: Expect rise acceleration -320, got ${riseAy}`);
+        console.assert(sinkAy === 320, `Assertion Failed: Expect sink acceleration 320, got ${sinkAy}`);
 
         // Test 6: Autopilot math sanity checks
         let testPathY = 300;
