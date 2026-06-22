@@ -79,6 +79,7 @@ All gameplay feedback is represented physically and auditorily:
   - **Aura Vaporization**: Active neon oscilloscope aura rings are instantly vaporized (reset to 0 active rings) on impact and must be rebuilt one by one.
   - **Guideline Lifeline**: The buddy's guide line is rendered on the terrain graphics layer (depth 0) and is obscured during a silt-out, mirroring the realism of losing visibility of the guideline in a sediment cloud. The player must follow the buddy's speech bubbles ("👌?")—which render at depth 20 (above the silt overlay)—to orient themselves and guide recovery.
 - **AI Buddy**: Displays helper speech bubbles ("👌?", "👌!") when assisting the player or clearing/recovering from silt. The buddy utilizes a safe (15px margin) and absolute (2px margin/midpoint fallback) terrain-clamping algorithm so they never collide with the walls or raise sediment on their own.
+- **Realistic Flashlight Occlusion**: Flashlight beams (player and buddy) are realistically obstructed by terrain. The beam uses an incremental raycast shadow-casting approximation to project shadows from encountered protrusions, preventing light from passing through solid rock. Marine snow illumination checks interpolate these exact occluded beam points so particles are only lit when within the visible beam.
 
 ### Active Debris-Driven Multipliers
 Instead of time-based milestones, multiplier growth is performance-driven:
@@ -92,6 +93,15 @@ When the flow multiplier is $\ge \times 9$, advanced aesthetic shifts occur (cap
 - **Background Saturation Bleed**: The background color bleeds into a highly saturated, breathing pulse matrix.
 - **Particle Frenzy**: Marine snow motes speed up to enhance the illusion of extreme speed.
 
+### "Super-Flow" State ($\ge \times 10$)
+When the flow multiplier is $\ge \times 10$, custom aesthetic shifts occur to reward the player without disrupting the core visual baseline:
+- **Chromatic Shockwave & Zoom Thud Pulse**: Reaching a multiplier of 10 or above triggers a fast-decaying chromatic aberration lens zoom flash and a camera lens zoom-in thud, accompanied by multiple fast-expanding neon ripples centered on the player.
+- **Overcharged Oscilloscope Aura**: The player's 7 neon aura rings increase in phase speed, oscillation amplitude, thickness, and glow brightness while cycling through rainbow gradients.
+- **Warp Speed Marine Snow Motion Blur**: Background marine snow particles speed up aggressively and stretch horizontally into motion blur streaks to create the illusion of high velocity.
+  - **Coloring & Thickness**: Illuminated streaks render in bright neon cyan (`0x00f0ff`) with high alpha (`0.85`), and are thickened to $1.8\times$ size to stand out clearly. Unilluminated snow streaks shift to a soft, visible light blue (`0x38bdf8`) with a target alpha of `0.25` so the warp effect is visible across the entire field.
+- **Visual Scaling Cap**: All Super-Flow visual scaling (including marine snow speedup, streak length, and aura ring size/thickness expansions) scales progressively but is capped at $\times 15$ to maintain visual balance and prevent screen clutter.
+- **Superflow Text Notifications**: Leveling up to 10+ spawns glowing, enlarged yellow text (`🫧 SUPERFLOW x{multiplier}! 🫧`).
+"
 ### Uncapped Deterministic Simulation
 - Rating calculations utilize the simulation function `calculateMaxPotentialPoints()`.
 - The simulation chronologically replicates the perfect run (all items collected, no silt-outs), factoring in the combo increments, cluster combo boosts, and decay gaps to compute the theoretical maximum score ($S_{max}$). This ensures the 5-star rating (awarded at $\ge 95\%$ of $S_{max}$) remains fully deterministic.

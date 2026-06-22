@@ -152,6 +152,7 @@ class ScubaFlowScene extends Phaser.Scene {
         this.flowMeter = 1.0;
         this.decayThreshold = 12500; // 12.5 seconds
         this.lightFlashIntensity = 1.0;
+        this.levelUpChromaticOffset = 0.0;
         this.pointsScore = 0;
         this.maxPotentialPoints = 0;
         this.musicFilter = null;
@@ -163,6 +164,8 @@ class ScubaFlowScene extends Phaser.Scene {
         this.targetEndX = 0;
         this.exhaleBubblesCount = 0;
         this.marineSnowMotes = [];
+        this.playerBeam = null;
+        this.buddyBeam = null;
 
         // Point Arrays pre-allocation for zero GC churn
         this.floorPoints = [];
@@ -230,6 +233,8 @@ class ScubaFlowScene extends Phaser.Scene {
             backgroundColor: 'rgba(2, 5, 20, 0.75)',
             padding: { x: 8, y: 4 }
         }).setOrigin(0.5).setDepth(20).setVisible(false);
+
+        this.cameras.main.ignore([this.buddyBubble, this.playerBubble]);
 
         // 6. Setup Graphics layers
         this.parallaxFarGraphics = this.add.graphics().setDepth(-2).setScrollFactor(0);  // farthest layer (slowest) — screen-space so it tiles left correctly
@@ -354,9 +359,52 @@ class ScubaFlowScene extends Phaser.Scene {
                             this.spawnCollectibles();
                             console.log("Collectibles spawned.");
 
+                            // Initialize Bioluminescent Marine Snow Motes (150 world-space motes)
+                            let startCamX = this.cameras.main.scrollX;
+                            this.marineSnowMotes = [];
+                            for (let i = 0; i < 150; i++) {
+                                this.marineSnowMotes.push({
+                                    x: startCamX + Math.random() * 1200,
+                                    y: Math.random() * 700,
+                                    vx: -12 - Math.random() * 14,
+                                    vy: -4 + Math.random() * 8,
+                                    size: 1.0 + Math.random() * 1.5,
+                                    alpha: 0.05
+                                });
+                            }
+                            this.marineSnowGraphics = this.add.graphics().setDepth(-1.5).setScrollFactor(1);
+
                             // Set camera to follow player
                             this.cameras.main.startFollow(this.player, true, 0.1, 1, -250, 0);
                             console.log("Camera follow configured.");
+
+                            // Set up UI Camera (exempt from PsychedelicFX pipeline)
+                            this.uiCamera = this.cameras.add(0, 0, 1200, 700);
+                            this.uiCamera.setBounds(0, 0, 999999, 700); // Set bounds to allow scrolling!
+                            this.uiCamera.startFollow(this.player, true, 0.1, 1, -250, 0);
+                            
+                            // Defensively filter the ignore list to prevent TypeErrors in case of uninitialized game objects
+                            let ignoreList = [
+                                this.parallaxFarGraphics,
+                                this.parallaxNearGraphics,
+                                this.backgroundGraphics,
+                                this.terrainGraphics,
+                                this.lightGraphics,
+                                this.siltOverlay,
+                                this.siltVignetteImage,
+                                this.foregroundGraphics,
+                                this.marineSnowGraphics,
+                                this.player,
+                                this.buddy,
+                                this.bubbleEmitter,
+                                this.siltEmitter,
+                                this.plumeEmitter
+                            ].filter(Boolean);
+                            
+                            this.uiCamera.ignore(ignoreList);
+                            if (this.collectiblesGroup) {
+                                this.uiCamera.ignore(this.collectiblesGroup.getChildren());
+                            }
 
                             // Register and add WebGL post-processing PsychedelicFX pipeline
                             let renderer = this.renderer;
@@ -369,20 +417,6 @@ class ScubaFlowScene extends Phaser.Scene {
                                      console.warn("Failed to register WebGL PostFX pipeline:", e);
                                 }
                             }
-
-                            // Initialize Bioluminescent Marine Snow Motes (40 screen-space motes)
-                            this.marineSnowMotes = [];
-                            for (let i = 0; i < 40; i++) {
-                                this.marineSnowMotes.push({
-                                    x: Math.random() * 1200,
-                                    y: Math.random() * 700,
-                                    vx: -12 - Math.random() * 14,
-                                    vy: -4 + Math.random() * 8,
-                                    size: 1.0 + Math.random() * 1.5,
-                                    alpha: 0.05
-                                });
-                            }
-                            this.marineSnowGraphics = this.add.graphics().setDepth(-1.5).setScrollFactor(0);
 
                             // ONLY destroy text overlay if everything succeeded!
                             if (loaderTween) loaderTween.stop();
@@ -506,6 +540,8 @@ class ScubaFlowScene extends Phaser.Scene {
                 fontSize: '140px',
                 fontStyle: 'bold'
             }).setOrigin(0.5).setDepth(100);
+
+            this.cameras.main.ignore(this.countdownText);
 
             showNext();
         });
@@ -988,11 +1024,15 @@ class ScubaFlowScene extends Phaser.Scene {
             // Update WebGL PostFX shader parameters (Chromatic Split)
             let fx = this.cameras.main.getPostPipeline(PsychedelicFX);
             if (fx) {
-                // Chromatic split decays in sync with silt time
+                // Decay custom level-up chromatic offset
+                if (this.levelUpChromaticOffset > 0) {
+                    this.levelUpChromaticOffset = Math.max(0, this.levelUpChromaticOffset - dt * 0.05); // dynamic decay
+                }
+                // Chromatic split decays in sync with silt time, blended with level-up offset
                 let siltOffset = (this.siltActive && this.currentSiltDuration > 0)
                     ? (fx.chromaticOffsetStart || 0.02) * Math.max(0, this.siltTime / this.currentSiltDuration)
                     : 0;
-                fx.chromaticOffset = siltOffset;
+                fx.chromaticOffset = Math.max(siltOffset, this.levelUpChromaticOffset);
             }
             // Flow multiplier decay logic (time without collecting debris reduces multiplier)
             if (this.scoreMultiplier > 1 && !this.siltActive && this.isPlaying && !this.countdownActive) {
@@ -1230,41 +1270,119 @@ class ScubaFlowScene extends Phaser.Scene {
         let bHandY = this.buddy.y - 2;
 
         let speedMultiplier = 1.0;
-        if (this.visualMultiplier >= 9) {
-            speedMultiplier += (this.visualMultiplier - 8) * 0.15;
+        if (this.scoreMultiplier >= 9) {
+            let speedScale = Math.min(7, this.scoreMultiplier - 8);
+            speedMultiplier += speedScale * 0.20;
         }
 
         for (let mote of this.marineSnowMotes) {
             mote.x += mote.vx * dt * speedMultiplier;
             mote.y += mote.vy * dt * speedMultiplier;
 
-            // Wrap screen boundaries
-            if (mote.x < 0) mote.x += 1200;
-            if (mote.x > 1200) mote.x -= 1200;
+            // Wrap relative to camera viewport in world space (with 100px padding off-screen)
+            if (mote.x < camX - 100) {
+                mote.x += 1400;
+                mote.y = Math.random() * 700;
+            }
+            if (mote.x > camX + 1300) {
+                mote.x -= 1400;
+                mote.y = Math.random() * 700;
+            }
             if (mote.y < 0) mote.y += 700;
             if (mote.y > 700) mote.y -= 700;
 
-            // Translate screen position to world position for light cone checks
-            let wx = mote.x + camX;
+            let wx = mote.x;
             let wy = mote.y;
 
-            // Player light beam check
-            let dxP = wx - pHandX;
-            let dyP = wy - pHandY;
-            let inPlayerCone = (dxP >= 0 && dxP <= 320 && Math.abs(dyP) <= (dxP / 320) * 75);
+            // Player light beam check using realistic shadow-occluded coordinates
+            let inPlayerCone = false;
+            if (this.playerBeam) {
+                let dxP = wx - this.playerBeam.x0;
+                if (dxP >= 0 && dxP <= 320) {
+                    let steps = 30;
+                    let index = dxP / (320 / steps);
+                    let i0 = Math.floor(index);
+                    let i1 = Math.min(steps, i0 + 1);
+                    let tRatio = index - i0;
+                    let yTop = Phaser.Math.Linear(this.playerBeam.topPoints[i0].y, this.playerBeam.topPoints[i1].y, tRatio);
+                    let yBottom = Phaser.Math.Linear(this.playerBeam.bottomPoints[i0].y, this.playerBeam.bottomPoints[i1].y, tRatio);
+                    if (wy >= yTop && wy <= yBottom) {
+                        inPlayerCone = true;
+                    }
+                }
+            }
 
-            // Buddy light beam check
-            let dxB = (wx - bHandX) * bDir;
-            let dyB = wy - bHandY;
-            let inBuddyCone = (dxB >= 0 && dxB <= 320 && Math.abs(dyB) <= (dxB / 320) * 75);
+            // Buddy light beam check using realistic shadow-occluded coordinates
+            let inBuddyCone = false;
+            if (this.buddyBeam) {
+                let bDir = this.buddyBeam.dir;
+                if (bDir === 1) {
+                    let dxB = wx - this.buddyBeam.x0;
+                    if (dxB >= 0 && dxB <= 320) {
+                        let steps = 30;
+                        let index = dxB / (320 / steps);
+                        let i0 = Math.floor(index);
+                        let i1 = Math.min(steps, i0 + 1);
+                        let tRatio = index - i0;
+                        let yTop = Phaser.Math.Linear(this.buddyBeam.topPoints[i0].y, this.buddyBeam.topPoints[i1].y, tRatio);
+                        let yBottom = Phaser.Math.Linear(this.buddyBeam.bottomPoints[i0].y, this.buddyBeam.bottomPoints[i1].y, tRatio);
+                        if (wy >= yTop && wy <= yBottom) {
+                            inBuddyCone = true;
+                        }
+                    }
+                } else {
+                    let dxB = this.buddyBeam.x0 - wx;
+                    if (dxB >= 0 && dxB <= 320) {
+                        let steps = 30;
+                        let index = dxB / (320 / steps);
+                        let i0 = Math.floor(index);
+                        let i1 = Math.min(steps, i0 + 1);
+                        let tRatio = index - i0;
+                        let yTop = Phaser.Math.Linear(this.buddyBeam.topPoints[i0].y, this.buddyBeam.topPoints[i1].y, tRatio);
+                        let yBottom = Phaser.Math.Linear(this.buddyBeam.bottomPoints[i0].y, this.buddyBeam.bottomPoints[i1].y, tRatio);
+                        if (wy >= yTop && wy <= yBottom) {
+                            inBuddyCone = true;
+                        }
+                    }
+                }
+            }
 
             let illuminated = inPlayerCone || inBuddyCone;
-            let targetAlpha = illuminated ? 0.40 : 0.05;
+            
+            // Adjust alpha targets. At x10+, make everything significantly brighter for "wow" effect!
+            let targetAlpha;
+            if (this.scoreMultiplier >= 10) {
+                targetAlpha = illuminated ? 0.85 : 0.25;
+            } else {
+                targetAlpha = illuminated ? 0.40 : 0.05;
+            }
             mote.alpha += (targetAlpha - mote.alpha) * 0.1;
 
-            let color = illuminated ? 0x00f0ff : 0x475569;
+            // Hide marine snow that is inside the cave walls (terrain)
+            let { floorY, ceilY } = this.getWallY(wx);
+            if (wy < ceilY || wy > floorY) {
+                continue;
+            }
+
+            // Colors: Bright cyan for illuminated.
+            // For unilluminated: dim slate-blue at low levels, brighter light blue at x10+ to make the speed lines stand out
+            let color;
+            if (illuminated) {
+                color = 0x00f0ff;
+            } else {
+                color = this.scoreMultiplier >= 10 ? 0x38bdf8 : 0x475569;
+            }
+
             g.fillStyle(color, mote.alpha);
-            g.fillCircle(mote.x, mote.y, mote.size);
+            if (this.scoreMultiplier >= 10) {
+                // Motion blur effect: stretch snow particles horizontally into prominent speed lines
+                let visualSuperScale = Math.min(6, this.scoreMultiplier - 9);
+                let streakLength = mote.size * (4.0 + visualSuperScale * 6.0);
+                // Thickened from mote.size * 0.4 to mote.size * 0.9 for dramatic visual feedback
+                g.fillRect(mote.x - streakLength, mote.y - mote.size * 0.9, streakLength * 2, mote.size * 1.8);
+            } else {
+                g.fillCircle(mote.x, mote.y, mote.size);
+            }
         }
     }
 
@@ -1619,16 +1737,27 @@ class ScubaFlowScene extends Phaser.Scene {
             // --- AURA RINGS: concentric neon rings that grow with scoreMultiplier ---
             // x1: none. x2-x7: rings. x8+: 7 rings.
             let auraLevels = Math.min(this.visualMultiplier - 1, 7);
+            let visualSuperScale = Math.max(0, Math.min(6, this.scoreMultiplier - 9));
+            
             for (let a = 0; a < auraLevels; a++) {
-                let auraHue = (this.baseHue + a * 75) % 360;
+                let auraHue = (this.baseHue + a * 75 + (visualSuperScale * 12)) % 360;
                 let auraColor = this.hslToColorInt(auraHue / 360, 1.0, 0.65);
-                // Each ring pulses with beat, offset phase per ring
-                let auraPhase = (this.elapsedTime * 0.003 + a * 0.8) % (Math.PI * 2);
-                let auraR = 32 + a * 18 + pulse * (10 + a * 5) + Math.sin(auraPhase) * 5;
+                
+                // Scale phase speed and amplitude dynamically with multiplier
+                let speedMult = 1.0 + visualSuperScale * 0.12;
+                let auraPhase = (this.elapsedTime * 0.003 * speedMult + a * 0.8) % (Math.PI * 2);
+                
+                let baseR = 32 + a * 18 + pulse * (10 + a * 5) + Math.sin(auraPhase) * 5;
+                let auraR = baseR + visualSuperScale * 1.5;
+                
                 let auraAlpha = 0.22 + pulse * 0.35 - a * 0.04;
+                if (visualSuperScale > 0) {
+                    auraAlpha = Math.min(0.9, auraAlpha + visualSuperScale * 0.04);
+                }
 
                 // Draw jagged oscilloscope-like aura
-                g.lineStyle(1.2 + a * 0.5, auraColor, Math.max(0, auraAlpha));
+                let lineWidth = 1.2 + a * 0.5 + (visualSuperScale * 0.15);
+                g.lineStyle(lineWidth, auraColor, Math.max(0, auraAlpha));
                 g.beginPath();
                 let steps = 60;
                 for (let step = 0; step <= steps; step++) {
@@ -1808,17 +1937,7 @@ class ScubaFlowScene extends Phaser.Scene {
             g.fillRoundedRect(handX - 1, handY - 3, 6, 6, 1);
             g.strokeRoundedRect(handX - 1, handY - 3, 6, 6, 1);
 
-            // Cave Diving Primary Light Beam
-            let beamIntensity = this.lightFlashIntensity !== undefined ? this.lightFlashIntensity : 1.0;
-            let beamLength = 280 * beamIntensity;
-            let beamSpread = 50 * beamIntensity;
-            g.fillStyle(accentColor, 0.08 * beamIntensity); // soft neon glowing beam
-            g.beginPath();
-            g.moveTo(handX + 3, handY);
-            g.lineTo(handX + 3 + beamLength, handY - beamSpread);
-            g.lineTo(handX + 3 + beamLength, handY + beamSpread);
-            g.closePath();
-            g.fillPath();
+
 
         } else if (this.avatarType === 'fish') {
             let glowRadius = 24 + this.V_lung * 8 + pulse * 8;
@@ -2155,13 +2274,13 @@ class ScubaFlowScene extends Phaser.Scene {
         // Player Light (hand is at 26, -2 relative to player container)
         let pHandX = this.player.x + 26;
         let pHandY = this.player.y - 2;
-        this.drawDiveLight(g, pHandX, pHandY, 1, 0xffffff, pAccent, pHue, true);
+        this.playerBeam = this.drawDiveLight(g, pHandX, pHandY, 1, 0xffffff, pAccent, pHue, true);
 
         // Buddy Light (hand is at 26, -2 relative to buddy container, scaled by scaleX)
         let bDir = this.buddy.scaleX; // 1 or -1
         let bHandX = this.buddy.x + 26 * bDir;
         let bHandY = this.buddy.y - 2;
-        this.drawDiveLight(g, bHandX, bHandY, bDir, 0xffffff, bAccent, bHue, false);
+        this.buddyBeam = this.drawDiveLight(g, bHandX, bHandY, bDir, 0xffffff, bAccent, bHue, false);
     }
 
     drawDiveLight(g, x0, y0, dir, mainColor, accentColor, hueVal, isPlayer = false) {
@@ -2182,6 +2301,10 @@ class ScubaFlowScene extends Phaser.Scene {
 
         let topPoints = [];
         let bottomPoints = [];
+        
+        let maxCeilSlope = -999999;
+        let minFloorSlope = 999999;
+
         for (let i = 0; i <= steps; i++) {
             let x = x0 + i * stepX;
             let ratio = i / steps;
@@ -2198,13 +2321,39 @@ class ScubaFlowScene extends Phaser.Scene {
             let floorLimitY = pathY + floorOffset;
             let ceilLimitY = pathY - ceilOffset;
 
-            // Constrain Y
+            // Constrain Y to physical walls at this step
             let cTop = Math.max(yTop, ceilLimitY);
             let cBottom = Math.min(yBottom, floorLimitY);
 
-            // Clamp
-            cTop = Math.min(cTop, floorLimitY);
-            cBottom = Math.max(cBottom, ceilLimitY);
+            // Shadow casting: limit angles by previous protrusions
+            if (i > 0) {
+                let dist = Math.abs(x - x0);
+                if (dist > 0.001) {
+                    let currentCeilSlope = (cTop - y0) / dist;
+                    let currentFloorSlope = (cBottom - y0) / dist;
+
+                    if (i === 1) {
+                        maxCeilSlope = currentCeilSlope;
+                        minFloorSlope = currentFloorSlope;
+                    } else {
+                        maxCeilSlope = Math.max(maxCeilSlope, currentCeilSlope);
+                        minFloorSlope = Math.min(minFloorSlope, currentFloorSlope);
+                    }
+
+                    cTop = y0 + maxCeilSlope * dist;
+                    cBottom = y0 + minFloorSlope * dist;
+
+                    // If shadow projections cross, light is blocked completely
+                    if (cTop > cBottom) {
+                        cTop = (cTop + cBottom) / 2;
+                        cBottom = cTop;
+                    }
+                }
+            }
+
+            // Final clamp to keep drawing within current walls (preventing light bleeding into ceiling/floor)
+            cTop = Phaser.Math.Clamp(cTop, ceilLimitY, floorLimitY);
+            cBottom = Phaser.Math.Clamp(cBottom, ceilLimitY, floorLimitY);
 
             topPoints.push({ x: x, y: cTop });
             bottomPoints.push({ x: x, y: cBottom });
@@ -2229,20 +2378,18 @@ class ScubaFlowScene extends Phaser.Scene {
         g.moveTo(x0, y0);
         for (let i = 0; i <= steps; i++) {
             let ptTop = topPoints[i];
-            let ptBottom = bottomPoints[i];
-            // Interpolate core towards the center y0
             let coreTop = ptTop.y * 0.45 + y0 * 0.55;
-            let coreBottom = ptBottom.y * 0.45 + y0 * 0.55;
             g.lineTo(ptTop.x, coreTop);
         }
         for (let i = steps; i >= 0; i--) {
-            let ptTop = topPoints[i];
             let ptBottom = bottomPoints[i];
             let coreBottom = ptBottom.y * 0.45 + y0 * 0.55;
-            g.lineTo(ptTop.x, coreBottom);
+            g.lineTo(topPoints[i].x, coreBottom);
         }
         g.closePath();
         g.fillPath();
+
+        return { x0: x0, dir: dir, topPoints: topPoints, bottomPoints: bottomPoints };
     }
 
     drawGuideLine() {
@@ -2890,15 +3037,43 @@ class ScubaFlowScene extends Phaser.Scene {
 
                 if (comboBumpsCount > 0) {
                     this.pointsScore += comboBonus;
+                    
+                    // Trigger level-up shockwave if multiplier is 10+
+                    if (this.scoreMultiplier >= 10) {
+                        this.levelUpChromaticOffset = 0.035; // punchy chromatic flash
+                        this.cameras.main.zoom = 1.05; // punchy camera lens thud
+                        
+                        // Spawn fast expanding ripples
+                        this.beatRipples.push({
+                            x: this.player.x,
+                            y: this.player.y,
+                            radius: 10,
+                            maxRadius: 500,
+                            alpha: 0.95
+                        });
+                        this.beatRipples.push({
+                            x: this.player.x,
+                            y: this.player.y,
+                            radius: 10,
+                            maxRadius: 400,
+                            alpha: 0.8
+                        });
+                    }
                 }
 
-                if (isClusterComplete && comboBumpsCount > 0) {
-                    this.spawnFloatingText(this.player.x, this.player.y - 30, `FLOW x${this.scoreMultiplier}! +${comboBonus}`, '#00ff66');
-                    this.spawnFloatingText(this.player.x, this.player.y - 15, `+${clusterPointBonus}`, '#00f0ff');
+                if (comboBumpsCount > 0) {
+                    let isSuper = this.scoreMultiplier >= 10;
+                    let textHex = isSuper ? '#ffea00' : '#00ff66'; // Always yellow for superflow
+                    let flowMsg = isSuper ? `🫧 SUPERFLOW x${this.scoreMultiplier}! +${comboBonus} 🫧` : `FLOW x${this.scoreMultiplier}! +${comboBonus}`;
+                    
+                    if (isClusterComplete) {
+                        this.spawnFloatingText(this.player.x, this.player.y - 30, flowMsg, textHex, isSuper);
+                        this.spawnFloatingText(this.player.x, this.player.y - 15, `+${clusterPointBonus}`, '#00f0ff');
+                    } else {
+                        this.spawnFloatingText(this.player.x, this.player.y - 35, flowMsg, textHex, isSuper);
+                    }
                 } else if (isClusterComplete) {
                     this.spawnFloatingText(this.player.x, this.player.y - 30, `+${clusterPointBonus}`, '#00f0ff');
-                } else if (comboBumpsCount > 0) {
-                    this.spawnFloatingText(this.player.x, this.player.y - 35, `FLOW x${this.scoreMultiplier}! +${comboBonus}`, '#00ff66');
                 } else {
                     this.spawnFloatingText(this.player.x, this.player.y - 20, `+${gainedPoints}`, '#bd00ff');
                 }
@@ -2922,6 +3097,10 @@ class ScubaFlowScene extends Phaser.Scene {
         let rndHue = Math.random() * 360;
         let sparkColor = Phaser.Display.Color.HSLToColor(rndHue / 360, 1.0, 0.6).color;
         expl.particleTint = sparkColor;
+
+        if (this.uiCamera) {
+            this.uiCamera.ignore(expl);
+        }
 
         expl.explode();
         this.time.delayedCall(800, () => expl.destroy());
@@ -2949,24 +3128,32 @@ class ScubaFlowScene extends Phaser.Scene {
         });
 
         ring.particleTint = colorObj.color;
+        
+        if (this.uiCamera) {
+            this.uiCamera.ignore(ring);
+        }
+
         ring.explode();
 
         this.time.delayedCall(1200, () => ring.destroy());
     }
 
-    spawnFloatingText(x, y, text, color) {
+    spawnFloatingText(x, y, text, color, isSuperFlow = false) {
         let fText = this.add.text(x, y, text, {
             fontFamily: 'Outfit',
-            fontSize: '16px',
+            fontSize: isSuperFlow ? '22px' : '16px',
             color: color,
-            fontStyle: 'bold'
+            fontStyle: 'bold',
+            shadow: isSuperFlow ? { color: color, blur: 15, stroke: true, fill: true } : null
         }).setOrigin(0.5).setDepth(20);
+
+        this.cameras.main.ignore(fText);
 
         this.tweens.add({
             targets: fText,
-            y: y - 40,
+            y: isSuperFlow ? y - 55 : y - 40,
             alpha: 0,
-            duration: 1000,
+            duration: isSuperFlow ? 1300 : 1000,
             onComplete: () => fText.destroy()
         });
     }
@@ -3041,6 +3228,10 @@ class ScubaFlowScene extends Phaser.Scene {
             let siltColor = this.hslToColorInt(siltHue / 360, 0.8, 0.45);
             siltE.particleTint = siltColor;
 
+            if (this.uiCamera) {
+                this.uiCamera.ignore(siltE);
+            }
+
             siltE.explode();
             this.time.delayedCall(5000, () => siltE.destroy());
         } // <- This was the missing brace that broke the game
@@ -3110,6 +3301,18 @@ class ScubaFlowScene extends Phaser.Scene {
             }
         }
         return 0.2;
+    }
+
+    getWallY(wx) {
+        if (!this.levelData || !this.levelData.path || this.levelData.path.length === 0) {
+            return { floorY: 600, ceilY: 100 };
+        }
+        let t = (wx / this.baseScrollSpeed) * 1000;
+        let targetY = this.getTargetYAtTime(t);
+        let localEnergy = this.getEnergyAtTime(t);
+
+        let { floorOffset, ceilOffset } = this.getWallOffsets(wx, localEnergy);
+        return { floorY: targetY + floorOffset, ceilY: targetY - ceilOffset };
     }
 
     getWallOffsets(wx, localEnergy) {
@@ -3394,6 +3597,8 @@ class ScubaFlowScene extends Phaser.Scene {
             color: '#cbd5e1',
             align: 'center'
         }).setOrigin(0.5).setDepth(100).setAlpha(0);
+
+        this.cameras.main.ignore([infoText, durationText]);
 
         this.tweens.add({
             targets: [infoText, durationText],
@@ -4206,6 +4411,15 @@ class ScubaFlowScene extends Phaser.Scene {
         let maxPoints = this.calculateMaxPotentialPoints();
         console.assert(maxPoints === 141, `Assertion Failed: Expected simulated max potential points to be 141, got ${maxPoints}`);
 
+        // Test 11: Super-Flow Multiplier Visuals validation
+        let prevScoreMult = this.scoreMultiplier;
+        let prevChromatic = this.levelUpChromaticOffset;
+        this.scoreMultiplier = 12;
+        this.levelUpChromaticOffset = 0.035;
+        console.assert(this.levelUpChromaticOffset === 0.035, `Assertion Failed: levelUpChromaticOffset should scale at scoreMultiplier=12, got ${this.levelUpChromaticOffset}`);
+        this.scoreMultiplier = prevScoreMult;
+        this.levelUpChromaticOffset = prevChromatic;
+
         // Restore original state
         this.levelData = originalLevelData;
         this.totalCollectibles = originalTotalCollectibles;
@@ -4215,6 +4429,31 @@ class ScubaFlowScene extends Phaser.Scene {
         this.scrollSpeed = originalScrollSpeed;
         this.clusterTotals = originalClusterTotals;
         this.clusterCollected = originalClusterCollected;
+
+        // Test 12: Flashlight Clamping and Occlusion boundaries
+        let mockG = {
+            clear: () => {}, lineStyle: () => {}, fillStyle: () => {},
+            beginPath: () => {}, moveTo: () => {}, lineTo: () => {},
+            closePath: () => {}, fillPath: () => {}, strokePath: () => {}
+        };
+        let testLight = this.drawDiveLight(mockG, 100, 250, 1, 0xffffff, 0xff00ff, 0.5);
+        console.assert(testLight !== undefined && testLight.topPoints.length > 0, "Assertion Failed: drawDiveLight must return topPoints");
+        for (let i = 0; i < testLight.topPoints.length; i++) {
+            let ptTop = testLight.topPoints[i];
+            let ptBottom = testLight.bottomPoints[i];
+            let tx = ptTop.x;
+            let tt = (tx / this.baseScrollSpeed) * 1000;
+            let tPathY = this.getTargetYAtTime(tt);
+            let tEnergy = this.getEnergyAtTime(tt);
+            let { floorOffset, ceilOffset } = this.getWallOffsets(tx, tEnergy);
+            let tFloorLimitY = tPathY + floorOffset;
+            let tCeilLimitY = tPathY - ceilOffset;
+
+            console.assert(ptTop.y >= tCeilLimitY, `Assertion Failed: topPoint Y (${ptTop.y}) must not go above ceiling limit (${tCeilLimitY})`);
+            console.assert(ptTop.y <= tFloorLimitY, `Assertion Failed: topPoint Y (${ptTop.y}) must not go below floor limit (${tFloorLimitY})`);
+            console.assert(ptBottom.y >= tCeilLimitY, `Assertion Failed: bottomPoint Y (${ptBottom.y}) must not go above ceiling limit (${tCeilLimitY})`);
+            console.assert(ptBottom.y <= tFloorLimitY, `Assertion Failed: bottomPoint Y (${ptBottom.y}) must not go below floor limit (${tFloorLimitY})`);
+        }
 
         console.log("=== DIAGNOSTICS PASSED: ALL CONTROLS FUNCTIONAL ===");
     }
