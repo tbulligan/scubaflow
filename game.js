@@ -203,7 +203,7 @@ class ScubaFlowScene extends Phaser.Scene {
         // Retrieve avatar selection from global scope
         this.avatarType = window.selectedAvatar || 'diver';
 
-        // 2. Run Self-Tests (Ponytail Rule)
+        // 2. Run Self-Tests
         this.runSelfTests();
 
         // 3. Create Dynamic Canvas Textures
