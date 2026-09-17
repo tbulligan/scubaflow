@@ -107,6 +107,15 @@
             user-select: none;
             -webkit-user-select: none;
             -webkit-touch-callout: none;
+            outline: none !important;
+            border: none !important;
+        }
+
+        #game-container canvas:focus,
+        #game-container canvas:focus-visible {
+            outline: none !important;
+            border: none !important;
+            box-shadow: none !important;
         }
 
         /* Intro Screen Overlay (Web Audio Unlocker) */

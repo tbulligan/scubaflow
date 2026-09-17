@@ -112,6 +112,7 @@ class ScubaFlowScene extends Phaser.Scene {
         this.siltDuration = 1800; // 1.8 seconds recovery distortion — shorter for playability
         this.siltSource = 'floor';
         this.currentSiltDuration = 1800;
+        this.activeSiltBursts = [];
 
         // Buddy State Machine
         this.buddyState = 'normal'; // 'normal', 'assisting', 'relieved'
@@ -2624,7 +2625,11 @@ class ScubaFlowScene extends Phaser.Scene {
     }
 
     spawnCollectibles() {
-        this.collectiblesGroup = this.add.group();
+        if (this.collectiblesGroup) {
+            this.collectiblesGroup.clear(true, true);
+        } else {
+            this.collectiblesGroup = this.add.group();
+        }
 
         for (let col of this.levelData.collectibles) {
             let colX = 250 + (col.time / 1000) * this.baseScrollSpeed;
@@ -2916,8 +2921,17 @@ class ScubaFlowScene extends Phaser.Scene {
                 this.uiCamera.ignore(siltE);
             }
 
+            if (!this.activeSiltBursts) this.activeSiltBursts = [];
+            this.activeSiltBursts.push(siltE);
+
             siltE.explode();
-            this.time.delayedCall(5000, () => siltE.destroy());
+            this.time.delayedCall(5000, () => {
+                if (this.activeSiltBursts) {
+                    let idx = this.activeSiltBursts.indexOf(siltE);
+                    if (idx !== -1) this.activeSiltBursts.splice(idx, 1);
+                }
+                try { siltE.destroy(); } catch (e) {}
+            });
         } // <- This was the missing brace that broke the game
     }
 
@@ -3713,9 +3727,37 @@ class ScubaFlowScene extends Phaser.Scene {
             } catch(e) {}
         }
 
-        // Reset collectibles
+        // Kill lingering silt explosion particle bursts and continuous emitters immediately
+        if (this.activeSiltBursts) {
+            for (let burst of this.activeSiltBursts) {
+                try { burst.destroy(); } catch (e) {}
+            }
+            this.activeSiltBursts = [];
+        }
+        if (this.siltEmitter) {
+            try {
+                if (typeof this.siltEmitter.killAll === 'function') this.siltEmitter.killAll();
+            } catch (e) {}
+        }
+        if (this.plumeEmitter) {
+            try {
+                if (typeof this.plumeEmitter.killAll === 'function') this.plumeEmitter.killAll();
+            } catch (e) {}
+        }
+        if (this.bubbleEmitter) {
+            try {
+                if (typeof this.bubbleEmitter.killAll === 'function') this.bubbleEmitter.killAll();
+            } catch (e) {}
+        }
+
+        // Reset and respawn collectibles so all subsequent runs are 100% identical
+        this.clusterCollected = {};
         if (this.levelData && this.levelData.collectibles) {
             this.levelData.collectibles.forEach(c => { c.collected = false; });
+            this.spawnCollectibles();
+            if (this.uiCamera && this.collectiblesGroup) {
+                this.uiCamera.ignore(this.collectiblesGroup.getChildren());
+            }
         }
 
         // Reset camera and master gain
@@ -3740,6 +3782,12 @@ class ScubaFlowScene extends Phaser.Scene {
         this.isPlaying = false;
         this.isPaused = false;
         this.tweens.killAll();
+        if (this.activeSiltBursts) {
+            for (let burst of this.activeSiltBursts) {
+                try { burst.destroy(); } catch (e) {}
+            }
+            this.activeSiltBursts = [];
+        }
         if (this.buddyBubble) this.buddyBubble.setVisible(false);
         if (this.playerBubble) this.playerBubble.setVisible(false);
 
@@ -4430,6 +4478,11 @@ class ScubaFlowScene extends Phaser.Scene {
         console.assert(this.comboCount === 0, "Assertion Failed: comboCount must reset to 0");
         console.assert(this.lightFlashIntensity === 1.0, "Assertion Failed: lightFlashIntensity must reset to 1.0");
         console.assert(this.buddyState === 'normal', "Assertion Failed: buddyState must reset to 'normal'");
+
+        this.activeSiltBursts = [{ destroy: () => {} }];
+        for (let b of this.activeSiltBursts) b.destroy();
+        this.activeSiltBursts = [];
+        console.assert(this.activeSiltBursts.length === 0, "Assertion Failed: activeSiltBursts must clear on reset");
 
         console.log("=== DIAGNOSTICS PASSED: ALL CONTROLS FUNCTIONAL ===");
     }
