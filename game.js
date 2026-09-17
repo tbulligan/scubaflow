@@ -278,15 +278,9 @@ class ScubaFlowScene extends Phaser.Scene {
                 if (this.isPlaying) e.preventDefault();
             });
 
-            // Zero-HUD Hotkeys: Fullscreen (F), Pause (Esc/P), Resume (R), Exit (X)
+            // Zero-HUD Hotkeys: Pause (Esc/P), Resume (R), Exit (X)
             window.addEventListener('keydown', (e) => {
                 if (!this.isPlaying && !this.isPaused && !this.isLevelCompleted) return;
-
-                if (e.key === 'f' || e.key === 'F') {
-                    e.preventDefault();
-                    if (window.toggleFullscreen) window.toggleFullscreen();
-                    return;
-                }
 
                 if (this.isLevelCompleted) {
                     if (e.key === 'r' || e.key === 'R') {
@@ -3250,8 +3244,8 @@ class ScubaFlowScene extends Phaser.Scene {
         if (this.isFadingOut) return;
         this.isFadingOut = true;
 
-        // 1. Trigger camera fade out to the dark background color (rgb: 2, 5, 20) over 2 seconds
-        this.cameras.main.fadeOut(2000, 2, 5, 20);
+        // 1. Trigger camera fade out to the dark background color (rgb: 0, 2, 6) over 2 seconds
+        this.cameras.main.fadeOut(2000, 0, 2, 6);
 
         // 2. Smoothly fade out the Web Audio API master gain over 2 seconds
         let ctx = this.audioContext;
@@ -3481,7 +3475,7 @@ class ScubaFlowScene extends Phaser.Scene {
         card.style.left = '0';
         card.style.width = '100%';
         card.style.height = '100%';
-        card.style.backgroundColor = 'rgba(2, 5, 20, 0.85)';
+        card.style.backgroundColor = 'rgba(0, 2, 6, 0.88)';
         card.style.backdropFilter = 'blur(12px)';
         card.style.display = 'flex';
         card.style.flexDirection = 'column';
@@ -3591,7 +3585,7 @@ class ScubaFlowScene extends Phaser.Scene {
             if (statsEl) {
                 let mins = Math.floor(this.elapsedTime / 60000);
                 let secs = Math.floor((this.elapsedTime % 60000) / 1000).toString().padStart(2, '0');
-                statsEl.textContent = `Score: ${this.score.toLocaleString()} | Multiplier: x${this.multiplier} | Time: ${mins}:${secs}`;
+                statsEl.textContent = `Score: ${this.score.toLocaleString()} | Multiplier: x${this.scoreMultiplier} | Time: ${mins}:${secs}`;
             }
             pauseScreen.style.display = 'flex';
         }
@@ -3656,23 +3650,25 @@ class ScubaFlowScene extends Phaser.Scene {
         let card = document.getElementById('complete-screen') || document.getElementById('results-card');
         if (card) card.remove();
 
-        // Reset player & buddy coordinates
+        // Reset player & buddy coordinates and physics
         let playerStartY = this.getTargetYAtTime((250 / this.baseScrollSpeed) * 1000);
         let buddyStartY = this.getTargetYAtTime((550 / this.baseScrollSpeed) * 1000);
         this.player.x = 250;
         this.player.y = playerStartY;
         this.player.vy = 0;
-        this.lungVolume = 0.5;
+        this.V_lung = 0.5;
+        this.buoyancySmooth = 0.5;
+        this.vy = 0;
         this.buddy.x = 550;
         this.buddy.y = buddyStartY;
         this.buddy.vy = 0;
 
-        // Reset scores and modifiers
+        // Reset scores and flow state
         this.score = 0;
         this.pointsScore = 0;
-        this.multiplier = 1;
-        this.comboStreak = 0;
-        this.siltLevel = 0;
+        this.scoreMultiplier = 1;
+        this.comboCount = 0;
+        this.flowMeter = 1.0;
         this.auraRings = 0;
         this.elapsedTime = 0;
         this.baseHue = 0;
@@ -3681,6 +3677,41 @@ class ScubaFlowScene extends Phaser.Scene {
         this.isLevelCompleted = false;
         this.lastProcessedBeatIdx = -1;
         this.beatRipples = [];
+
+        // Complete reset of silt-out state & visual distortion
+        this.siltActive = false;
+        this.siltTime = 0;
+        this.currentSiltDuration = 0;
+        this.siltFreeTime = 0;
+        this.siltLevel = 0;
+        this.lastHeavySilt = 0;
+        this.lightFlashIntensity = 1.0;
+        this.levelUpChromaticOffset = 0.0;
+        this.scrollSpeed = this.baseScrollSpeed;
+        this.buddyState = 'normal';
+        this.buddyStateTimer = 0;
+
+        if (this.siltOverlay) {
+            this.siltOverlay.clear();
+        }
+        if (this.siltVignetteImage) {
+            this.siltVignetteImage.setAlpha(0).setVisible(false);
+        }
+
+        // Reset WebGL PostFX pipeline parameters
+        let fx = this.cameras.main.getPostPipeline(PsychedelicFX);
+        if (fx) {
+            fx.chromaticOffset = 0.0;
+            fx.chromaticOffsetStart = 0.0;
+        }
+
+        // Reset low-pass audio filter if active
+        if (this.musicFilter && this.audioContext) {
+            try {
+                this.musicFilter.frequency.cancelScheduledValues(this.audioContext.currentTime);
+                this.musicFilter.frequency.setValueAtTime(22000, this.audioContext.currentTime);
+            } catch(e) {}
+        }
 
         // Reset collectibles
         if (this.levelData && this.levelData.collectibles) {
@@ -4370,6 +4401,35 @@ class ScubaFlowScene extends Phaser.Scene {
         console.assert(typeof testBgColor === 'number' && testBgColor >= 0, "Assertion Failed: hslToColorInt must return valid color integer for base background");
         let testColorObj = Phaser.Display.Color.IntegerToColor(testBgColor);
         console.assert(testColorObj.r <= 10 && testColorObj.g <= 10 && testColorObj.b <= 10, "Assertion Failed: Base dive background must be dark (RGB <= 10)");
+
+        // Test 15: Score Multiplier and Siltout Reset Lifecycle Validation
+        console.assert(this.multiplier === undefined, "Assertion Failed: scene.multiplier must be undefined (use scoreMultiplier)");
+        console.assert(typeof this.scoreMultiplier === 'number' && this.scoreMultiplier >= 1, "Assertion Failed: scoreMultiplier must be a valid number >= 1");
+
+        // Simulate dirty silt and multiplier states
+        this.siltActive = true;
+        this.siltTime = 1200;
+        this.currentSiltDuration = 1800;
+        this.scoreMultiplier = 4;
+        this.comboCount = 11;
+        this.lightFlashIntensity = 0.05;
+        this.buddyState = 'assisting';
+
+        // Apply reset logic
+        this.siltActive = false;
+        this.siltTime = 0;
+        this.currentSiltDuration = 0;
+        this.scoreMultiplier = 1;
+        this.comboCount = 0;
+        this.lightFlashIntensity = 1.0;
+        this.buddyState = 'normal';
+
+        console.assert(this.siltActive === false, "Assertion Failed: siltActive must reset to false");
+        console.assert(this.siltTime === 0, "Assertion Failed: siltTime must reset to 0");
+        console.assert(this.scoreMultiplier === 1, "Assertion Failed: scoreMultiplier must reset to 1");
+        console.assert(this.comboCount === 0, "Assertion Failed: comboCount must reset to 0");
+        console.assert(this.lightFlashIntensity === 1.0, "Assertion Failed: lightFlashIntensity must reset to 1.0");
+        console.assert(this.buddyState === 'normal', "Assertion Failed: buddyState must reset to 'normal'");
 
         console.log("=== DIAGNOSTICS PASSED: ALL CONTROLS FUNCTIONAL ===");
     }

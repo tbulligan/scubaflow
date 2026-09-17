@@ -71,13 +71,13 @@ For ScubaFlow:
 ### Zero-HUD Game Controls & Lifecycle Management
 - **Translucent Quick Controls Dock:**
   - Minimal top-right corner dock (`opacity: 0.45` / `0.6` on touch, glows on hover/focus):
-    - `btn-fullscreen`: Toggles borderless HTML5 Fullscreen (`F` key). Feature-detects `fullscreenEnabled` to gracefully hide on unsupported platforms (e.g. iPhone Safari).
+    - `btn-fullscreen`: Toggles borderless HTML5 Fullscreen (`F` key). Globally registered across intro screen, gameplay, pause menu, and results card. Feature-detects `fullscreenEnabled` to gracefully hide on unsupported platforms (e.g. iPhone Safari).
     - `btn-pause`: Toggles pause overlay (`Esc` / `P` keys). Hidden on intro screen, visible during dive.
   - **Mobile Touch Isolation (`isInteractiveUI` & `bindFastTap`):** Prevents window-wide touch breathing listeners (`preventDefault()`) from blocking dock and modal button taps. `bindFastTap` triggers instantly on touch without 300ms mobile delay.
 - **Pause & Resume Lifecycle:**
-  - `togglePause()` / `pauseDive()` suspends Web Audio clock (`audioContext.suspend()`), pauses update loop, renders glass pause modal displaying current score, multiplier, and elapsed time.
+  - `togglePause()` / `pauseDive()` suspends Web Audio clock (`audioContext.suspend()`), pauses update loop, renders glass pause modal displaying current score, flow multiplier (`this.scoreMultiplier`), and elapsed time.
   - `resumeDive()` resumes Web Audio (`audioContext.resume()`) and hides modal (`Esc` / `P` keys).
-  - `restartDive()` restarts dive from beginning (`R` key in-game, in pause, or on results screen). Clears lingering camera `fadeOut` effects with `resetFX()`, removes results card (`#complete-screen` / `.results-card`), and deterministically resets `this.baseHue = 0`.
+  - `restartDive()` restarts dive from beginning (`R` key in-game, in pause, or on results screen). Completely resets silt-out state (`siltActive`, `siltTime`, `currentSiltDuration`, `siltOverlay`, `siltVignetteImage`), PostFX chromatic offsets, flashlight intensity, audio lowpass filter, `this.scoreMultiplier = 1`, `this.comboCount = 0`, and `this.buddyState = 'normal'`. Clears lingering camera `fadeOut` effects with `resetFX()`, removes results card (`#complete-screen` / `.results-card`), and resets `this.baseHue = 0`.
   - `exitToTrackSelect()` exits to track selection menu (`X` key in pause or on results screen). Removes results card, destroys Phaser instance, and unhides uploader overlay.
 - **Results Card Controls:**
   - Displays "DIVE AGAIN (R)" and "SELECT NEW TRACK (X)" wired with `bindFastTap` for instant mobile taps and keyboard hotkeys (`R`/`X`).
@@ -89,7 +89,7 @@ For ScubaFlow:
 - **Seamless Desktop Borderless Viewport:**
   - `#game-container` fills 100% width and height without fixed 1200x700 box borders or glowing boxes in fullscreen / F11 mode.
 - **Unified Countdown & Dive Background Luminance:**
-  - Base colors unified to pure void `#000206` across HTML `.ambient-glow`, `#game-container`, Phaser game config, decoder overlay, and `this.cameras.main.setBackgroundColor` (`lightnessBoost = 0.012`), eliminating blue tint bleed and brightness shifts.
+  - Base colors unified to pure void `#000206` across HTML `body`, `--bg-color`, `.ambient-glow`, `#game-container`, `#intro-screen`, Phaser game config, decoder overlay, camera `fadeOut`, and `this.cameras.main.setBackgroundColor` (`lightnessBoost = 0.012`), eliminating blue tint bleed and brightness shifts.
 
 ### Zero-HUD Diegetic Signals & Balance Mechanics
 Feedback physical + auditory:
