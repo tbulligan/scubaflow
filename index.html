@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>ScubaFlow — Neon Buoyancy Music Game</title>
 
     <meta name="description" content="An action-focused neon buoyancy music game where you control your depth purely with your spacebar and navigate challenging cave tunnels.">
@@ -80,13 +80,22 @@
 
         #game-container {
             width: 1200px;
+            max-width: 100vw;
             height: 700px;
+            max-height: 100vh;
             position: relative;
             box-shadow: 0 0 60px rgba(0, 240, 255, 0.15);
             border-radius: 16px;
             overflow: hidden;
             border: 1px solid rgba(0, 240, 255, 0.12);
             background-color: #010410;
+            touch-action: none;
+        }
+
+        #game-container canvas {
+            touch-action: none;
+            user-select: none;
+            -webkit-user-select: none;
         }
 
         /* Intro Screen Overlay (Web Audio Unlocker) */
@@ -451,6 +460,89 @@
         .menu-divider {
             color: rgba(255, 255, 255, 0.1);
         }
+
+        .file-label.dragover {
+            border-color: var(--primary) !important;
+            color: #fff !important;
+            background: rgba(0, 240, 255, 0.12) !important;
+            box-shadow: 0 0 30px rgba(0, 240, 255, 0.35) !important;
+            transform: scale(1.02);
+        }
+
+        @media (max-width: 640px) {
+            .glass-card {
+                padding: 18px 20px;
+                width: 94%;
+                border-radius: 18px;
+            }
+            h1 {
+                font-size: 1.8rem;
+            }
+            .subtitle {
+                font-size: 0.72rem;
+                margin-bottom: 12px;
+            }
+            .instructions-minimal {
+                font-size: 0.8rem;
+                margin-bottom: 12px;
+                padding: 10px 12px;
+            }
+            .uploader-container {
+                margin-bottom: 12px;
+            }
+            .file-label {
+                padding: 14px;
+            }
+            .switch-container {
+                margin-bottom: 18px;
+                padding: 10px 14px;
+            }
+            .btn-dive {
+                padding: 12px 20px;
+                font-size: 0.95rem;
+            }
+        }
+
+        @media (max-height: 520px) and (orientation: landscape) {
+            .glass-card {
+                padding: 12px 18px;
+                max-height: 94vh;
+            }
+            h1 {
+                font-size: 1.4rem;
+                margin-bottom: 2px;
+            }
+            .subtitle {
+                margin-bottom: 6px;
+                font-size: 0.7rem;
+            }
+            .instructions-minimal {
+                margin-bottom: 8px;
+                padding: 6px 10px;
+                font-size: 0.75rem;
+            }
+            .uploader-container {
+                margin-bottom: 8px;
+            }
+            .file-label {
+                padding: 8px;
+            }
+            .upload-icon {
+                font-size: 1.3rem;
+                margin-bottom: 4px;
+            }
+            .switch-container {
+                margin-bottom: 10px;
+                padding: 6px 12px;
+            }
+            .btn-dive {
+                padding: 8px 16px;
+                font-size: 0.85rem;
+            }
+            .menu-links {
+                margin-top: 6px;
+            }
+        }
     </style>
 </head>
 <body>
@@ -470,7 +562,7 @@
                 <div class="subtitle">Neon Buoyancy Music Game</div>
                 
                 <div class="instructions-minimal">
-                    <p>⌨️ Hold <strong>Spacebar</strong> to float, release to sink.</p>
+                    <p>⌨️ Hold <strong>Spacebar</strong> or <strong>Tap & Hold Screen</strong> to float, release to sink.</p>
                     <p>💎 Collect neon debris, avoid the walls, and flow with the music.</p>
                 </div>
 
@@ -478,7 +570,7 @@
                     <label for="audio-file-input" class="file-label" id="file-label-container">
                         <div class="upload-icon">🎧</div>
                         <div class="upload-title" id="file-label-text">Select Music Track to Dive</div>
-                        <div class="upload-subtitle">Supports .mp3, .wav, .ogg files</div>
+                        <div class="upload-subtitle">Supports .mp3, .wav, .ogg (click or drag &amp; drop)</div>
                     </label>
                     <input type="file" id="audio-file-input" accept="audio/*" style="display:none;">
                 </div>
@@ -510,7 +602,6 @@
 
     <!-- Core Game Controller -->
     <script>
-        window.selectedAvatar = 'diver';
         window.customAudioBuffer = null;
         window.useAutopilot = false;
 
@@ -526,27 +617,64 @@
         const fileInput = document.getElementById('audio-file-input');
         const fileLabelText = document.getElementById('file-label-text');
         const fileLabelContainer = document.getElementById('file-label-container');
+
+        function loadAudioFile(file) {
+            if (!file) return;
+            if (file.type && !file.type.startsWith('audio/') && !/\.(mp3|wav|ogg|m4a|aac|flac)$/i.test(file.name)) {
+                fileLabelText.textContent = '⚠️ Drop an audio file (.mp3, .wav, .ogg)';
+                return;
+            }
+            fileLabelText.textContent = `⏳ Reading: ${file.name}...`;
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                window.customAudioBuffer = event.target.result; // Store as ArrayBuffer
+                window.customTrackName = file.name; // Store track name
+                fileLabelText.textContent = `✅ Loaded: ${file.name}`;
+                fileLabelContainer.style.borderColor = '#00f0ff';
+                fileLabelContainer.style.color = '#00f0ff';
+                fileLabelContainer.style.boxShadow = '0 0 15px rgba(0, 240, 255, 0.2)';
+                
+                // Enable the button!
+                const btn = document.getElementById('btn-dive');
+                btn.removeAttribute('disabled');
+                btn.style.opacity = '1';
+                btn.style.pointerEvents = 'auto';
+                btn.textContent = 'Begin Dive';
+            };
+            reader.readAsArrayBuffer(file);
+        }
+
         fileInput.addEventListener('change', (e) => {
-            const file = e.target.files[0];
-            if (file) {
-                fileLabelText.textContent = `⏳ Reading: ${file.name}...`;
-                const reader = new FileReader();
-                reader.onload = (event) => {
-                    window.customAudioBuffer = event.target.result; // Store as ArrayBuffer
-                    window.customTrackName = file.name; // Store track name
-                    fileLabelText.textContent = `✅ Loaded: ${file.name}`;
-                    fileLabelContainer.style.borderColor = '#00f0ff';
-                    fileLabelContainer.style.color = '#00f0ff';
-                    fileLabelContainer.style.boxShadow = '0 0 15px rgba(0, 240, 255, 0.2)';
-                    
-                    // Enable the button!
-                    const btn = document.getElementById('btn-dive');
-                    btn.removeAttribute('disabled');
-                    btn.style.opacity = '1';
-                    btn.style.pointerEvents = 'auto';
-                    btn.textContent = 'Begin Dive';
-                };
-                reader.readAsArrayBuffer(file);
+            loadAudioFile(e.target.files[0]);
+        });
+
+        // Prevent default window drop behavior (opening file)
+        window.addEventListener('dragover', (e) => e.preventDefault());
+        window.addEventListener('drop', (e) => e.preventDefault());
+
+        // Drag & Drop event handlers on uploader container
+        ['dragenter', 'dragover'].forEach((evt) => {
+            fileLabelContainer.addEventListener(evt, (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                fileLabelContainer.classList.add('dragover');
+            });
+        });
+
+        ['dragleave', 'dragend'].forEach((evt) => {
+            fileLabelContainer.addEventListener(evt, (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                fileLabelContainer.classList.remove('dragover');
+            });
+        });
+
+        fileLabelContainer.addEventListener('drop', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            fileLabelContainer.classList.remove('dragover');
+            if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                loadAudioFile(e.dataTransfer.files[0]);
             }
         });
 
