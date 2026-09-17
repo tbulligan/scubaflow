@@ -76,25 +76,7 @@ class ScubaFlowScene extends Phaser.Scene {
     }
 
     hslToColorInt(h, s, l) {
-        let r, g, b;
-        if (s === 0) {
-            r = g = b = l; // achromatic
-        } else {
-            const hue2rgb = (p, q, t) => {
-                if (t < 0) t += 1;
-                if (t > 1) t -= 1;
-                if (t < 1/6) return p + (q - p) * 6 * t;
-                if (t < 1/2) return q;
-                if (t < 2/3) return p + (q - p) * (2/3 - t) * 6;
-                return p;
-            };
-            let q = l < 0.5 ? l * (1 + s) : l + s - l * s;
-            let p = 2 * l - q;
-            r = hue2rgb(p, q, h + 1/3);
-            g = hue2rgb(p, q, h);
-            b = hue2rgb(p, q, h - 1/3);
-        }
-        return (Math.round(r * 255) << 16) | (Math.round(g * 255) << 8) | Math.round(b * 255);
+        return Phaser.Display.Color.HSLToColor(h, s, l).color;
     }
 
     init() {
@@ -125,7 +107,6 @@ class ScubaFlowScene extends Phaser.Scene {
         this.lastProcessedBeatIdx = -1;
 
         // Visual Distortion Silt Mode
-        this.sActive = false; // renamed from siltActive to avoid search noise if needed, but wait, keeping same names:
         this.siltActive = false;
         this.siltTime = 0;
         this.siltDuration = 1800; // 1.8 seconds recovery distortion — shorter for playability
@@ -172,6 +153,25 @@ class ScubaFlowScene extends Phaser.Scene {
         this.ceilPoints = [];
         this.farPoints = [];
         this.nearPoints = [];
+
+        this.playerCheckPoints = [
+            { x: 0, y: 0, r: 6.5, floor: true, ceil: true },
+            { x: 14, y: -4, r: 4, floor: true, ceil: true },
+            { x: -10, y: -13, r: 2, floor: false, ceil: true },
+            { x: 26, y: -2, r: 3, floor: true, ceil: true },
+            { x: 0, y: 0, r: 4, floor: true, ceil: true },
+            { x: 0, y: 0, r: 4, floor: true, ceil: true }
+        ];
+        this.buddyCheckPoints = [
+            { x: 0, y: 0, r: 10 },
+            { x: 0, y: -4, r: 6 },
+            { x: 0, y: 0, r: 5 },
+            { x: 0, y: 0, r: 8 },
+            { x: 0, y: 0, r: 8 }
+        ];
+        this.diverLimbs = {
+            ke: 0, ke2: 0, foot1X: 0, foot1Y: 0, foot2X: 0, foot2Y: 0
+        };
     }
 
     preload() {
@@ -200,8 +200,7 @@ class ScubaFlowScene extends Phaser.Scene {
         this.beatRipples = [];
         this.targetEndX = (this.levelData.songLengthMs / 1000) * this.baseScrollSpeed + 250;
 
-        // Retrieve avatar selection from global scope
-        this.avatarType = window.selectedAvatar || 'diver';
+        this.avatarType = 'diver';
 
         // 2. Run Self-Tests
         this.runSelfTests();
@@ -601,33 +600,29 @@ class ScubaFlowScene extends Phaser.Scene {
             // 1. (baseHue now updated in section 6 below, multiplier-scaled)
 
 
-            // Multi-point body checkPoints definition (defined early so they can be reused for autopilot safety clamping)
-            let checkPoints = [];
-            if (this.avatarType === 'diver') {
-                let frogPhase = (this.elapsedTime / 350) % (Math.PI * 2);
-                let kickExtension = Math.max(0, Math.sin(frogPhase));
-                let frogPhase2 = frogPhase + 0.25;
-                let kickExtension2 = Math.max(0, Math.sin(frogPhase2));
+            // Multi-point body checkPoints definition (cached on instance to avoid GC churn)
+            let frogPhase = (this.elapsedTime / 350) % (Math.PI * 2);
+            let ke = Math.max(0, Math.sin(frogPhase));
+            let frogPhase2 = frogPhase + 0.25;
+            let ke2 = Math.max(0, Math.sin(frogPhase2));
 
-                let foot2X = -8 - (6 + kickExtension * 8) - (2 + kickExtension * 12);
-                let foot2Y = -6 - (12 - kickExtension * 8) - (10 - kickExtension * 10);
+            let foot2X = -8 - (6 + ke * 8) - (2 + ke * 12);
+            let foot2Y = -6 - (12 - ke * 8) - (10 - ke * 10);
+            let foot1X = -10 - (6 + ke2 * 8) - (2 + ke2 * 12);
+            let foot1Y = 2 - (12 - ke2 * 8) - (10 - ke2 * 10);
 
-                let foot1X = -10 - (6 + kickExtension2 * 8) - (2 + kickExtension2 * 12);
-                let foot1Y = 2 - (12 - kickExtension2 * 8) - (10 - kickExtension2 * 10);
+            this.diverLimbs.ke = ke;
+            this.diverLimbs.ke2 = ke2;
+            this.diverLimbs.foot1X = foot1X;
+            this.diverLimbs.foot1Y = foot1Y;
+            this.diverLimbs.foot2X = foot2X;
+            this.diverLimbs.foot2Y = foot2Y;
 
-                checkPoints = [
-                    { x: 0, y: 0, r: 6.5, floor: true, ceil: true }, // Torso center
-                    { x: 14, y: -4, r: 4, floor: true, ceil: true }, // Head
-                    { x: -10, y: -13, r: 2, floor: false, ceil: true }, // Tank tops (highest solid point)
-                    { x: 26, y: -2, r: 3, floor: true, ceil: true }, // Light hand (forward-most)
-                    { x: foot1X, y: foot1Y, r: 4, floor: true, ceil: true }, // Foot 1 — floor & ceiling
-                    { x: foot2X, y: foot2Y, r: 4, floor: true, ceil: true }, // Foot 2 — floor & ceiling
-                ];
-            } else {
-                checkPoints = [
-                    { x: 0, y: 0, r: 12 }
-                ];
-            }
+            let checkPoints = this.playerCheckPoints;
+            checkPoints[4].x = foot1X;
+            checkPoints[4].y = foot1Y;
+            checkPoints[5].x = foot2X;
+            checkPoints[5].y = foot2Y;
 
             // 2. Process Input & Buoyancy State
             if (this.useAutopilot) {
@@ -650,12 +645,7 @@ class ScubaFlowScene extends Phaser.Scene {
 
                 for (let pt of checkPoints) {
                     let wx = px + pt.x;
-                    let ptTime = (wx / this.baseScrollSpeed) * 1000;
-                    let ptPathY = this.getTargetYAtTime(ptTime);
-                    let ptEnergy = this.getEnergyAtTime(ptTime);
-                    let { floorOffset, ceilOffset } = this.getWallOffsets(wx, ptEnergy);
-                    let ptFloorY = ptPathY + floorOffset;
-                    let ptCeilY = ptPathY - ceilOffset;
+                    let { floorY: ptFloorY, ceilY: ptCeilY } = this.getWallY(wx);
 
                     if (pt.ceil !== false) {
                         minYAllowed = Math.max(minYAllowed, ptCeilY - pt.y + pt.r + safetyMargin);
@@ -680,7 +670,7 @@ class ScubaFlowScene extends Phaser.Scene {
             }
 
             // Standard input & lung volume simulation (shared between manual & autopilot)
-            let spaceDown = this.useAutopilot ? this.simulatedSpaceDown : this.spaceKey.isDown;
+            let spaceDown = this.isBreathingIn();
             let fillRate = 3.0;
             if (spaceDown) {
                 this.V_lung = Math.min(1.0, this.V_lung + fillRate * physDt);
@@ -756,12 +746,7 @@ class ScubaFlowScene extends Phaser.Scene {
 
                 for (let pt of checkPoints) {
                     let wx = px + pt.x;
-                    let ptTime = (wx / this.baseScrollSpeed) * 1000;
-                    let ptPathY = this.getTargetYAtTime(ptTime);
-                    let ptEnergy = this.getEnergyAtTime(ptTime);
-                    let { floorOffset, ceilOffset } = this.getWallOffsets(wx, ptEnergy);
-                    let ptFloorY = ptPathY + floorOffset;
-                    let ptCeilY = ptPathY - ceilOffset;
+                    let { floorY: ptFloorY, ceilY: ptCeilY } = this.getWallY(wx);
 
                     if (pt.ceil !== false) {
                         minYAllowed = Math.max(minYAllowed, ptCeilY - pt.y + pt.r + safetyMargin);
@@ -786,33 +771,17 @@ class ScubaFlowScene extends Phaser.Scene {
             // 4. Cave Boundaries & Local Energy Calculation
             let px = this.player.x;
             let timeAtPlayer = (px / this.baseScrollSpeed) * 1000;
-            let localEnergy = this.getEnergyAtTime(timeAtPlayer);
-            this.localEnergy = localEnergy;
-
-            let pPathY = this.getTargetYAtTime(timeAtPlayer);
-            let { floorOffset, ceilOffset } = this.getWallOffsets(px, localEnergy);
-
-            let floorY = pPathY + floorOffset;
-            let ceilingY = pPathY - ceilOffset;
-
-            // Re-use checkPoints defined early in Section 2 for multi-point body collision checks
+            this.localEnergy = this.getEnergyAtTime(timeAtPlayer);
+            let { floorY, ceilY: ceilingY } = this.getWallY(px);
 
             let collisionTriggered = false;
             let collisionSource = 'floor';
-
-            // Capture pre-collision vertical velocity to determine impact strength
             let impactVy = preClampVy;
 
             for (let pt of checkPoints) {
                 let wx = px + pt.x;
                 let wy = this.player.y + pt.y;
-
-                let ptTime = (wx / this.baseScrollSpeed) * 1000;
-                let ptPathY = this.getTargetYAtTime(ptTime);
-                let ptEnergy = this.getEnergyAtTime(ptTime);
-                let { floorOffset, ceilOffset } = this.getWallOffsets(wx, ptEnergy);
-                let ptFloorY = ptPathY + floorOffset;
-                let ptCeilY = ptPathY - ceilOffset;
+                let { floorY: ptFloorY, ceilY: ptCeilY } = this.getWallY(wx);
 
                 if ((pt.floor !== false) && wy + pt.r >= ptFloorY) {
                     collisionTriggered = true;
@@ -984,12 +953,7 @@ class ScubaFlowScene extends Phaser.Scene {
 
             for (let pt of buddyPts) {
                 let wx = this.buddy.x + pt.x;
-                let ptTime = (wx / this.baseScrollSpeed) * 1000;
-                let ptPathY = this.getTargetYAtTime(ptTime);
-                let ptEnergy = this.getEnergyAtTime(ptTime);
-                let { floorOffset, ceilOffset } = this.getWallOffsets(wx, ptEnergy);
-                let ptFloorY = ptPathY + floorOffset;
-                let ptCeilY = ptPathY - ceilOffset;
+                let { floorY: ptFloorY, ceilY: ptCeilY } = this.getWallY(wx);
 
                 minYAllowed = Math.max(minYAllowed, ptCeilY - pt.y + pt.r + safetyMargin);
                 maxYAllowed = Math.min(maxYAllowed, ptFloorY - pt.y - pt.r - safetyMargin);
@@ -1216,7 +1180,7 @@ class ScubaFlowScene extends Phaser.Scene {
             let breathPhase = (this.time.now % breathPeriod) / breathPeriod;
             spaceDown = (breathPhase < 0.5);
         } else {
-            spaceDown = this.useAutopilot ? this.simulatedSpaceDown : this.spaceKey.isDown;
+            spaceDown = this.isBreathingIn();
         }
 
         if (!spaceDown && this.V_lung > 0.05) {
@@ -1394,26 +1358,6 @@ class ScubaFlowScene extends Phaser.Scene {
         let baseLum = this.siltActive ? 0.15 : Math.min(0.55, 0.25 + multiFactor * 0.043);
         let baseAlpha = this.siltActive ? 0.08 : Math.min(0.55, 0.18 + multiFactor * 0.053);
 
-        const getCaveFloorY = (worldX) => {
-            let t = (worldX / this.baseScrollSpeed) * 1000;
-            let pathY = this.getTargetYAtTime(t);
-            let energy = this.getEnergyAtTime(t);
-            let bOff = Math.max(65, 85 - energy * 30);
-            let jag = 0.5 + energy * 1.5;
-            let bPulse = (this.currentBeatPulse || 0) * 15 * (0.8 + energy);
-            return pathY + Math.max(68, bOff + (Math.cos(worldX * 0.015) * 10 + Math.sin(worldX * 0.04) * 5) * jag) + bPulse;
-        };
-
-        const getCaveCeilY = (worldX) => {
-            let t = (worldX / this.baseScrollSpeed) * 1000;
-            let pathY = this.getTargetYAtTime(t);
-            let energy = this.getEnergyAtTime(t);
-            let bOff = Math.max(65, 85 - energy * 30);
-            let jag = 0.5 + energy * 1.5;
-            let bPulse = (this.currentBeatPulse || 0) * 15 * (0.8 + energy);
-            return pathY - Math.max(68, bOff + (Math.sin(worldX * 0.02) * 10 + Math.cos(worldX * 0.05) * 5) * jag) - bPulse;
-        };
-
         // flowFill: 0 at multiplier x1 (wireframe), 1 at multiplier x8 (full solid neon) - gradual power curve
         let flowFill = Math.pow((this.visualMultiplier - 1) / 7.0, 1.5);
 
@@ -1447,7 +1391,7 @@ class ScubaFlowScene extends Phaser.Scene {
             for (let nb = -1; nb <= bCount; nb++) {
                 let bsx = nb * bStep - (camX * farFactor) % bStep;
                 let bwx = bsx + camX * farFactor;
-                let bc = getCaveCeilY(bwx);
+                let { ceilY: bc } = this.getWallY(bwx);
                 if (bFirst) { fg.moveTo(bsx, -50); fg.lineTo(bsx, bc); bFirst = false; }
                 else { fg.lineTo(bsx, bc); }
             }
@@ -1464,7 +1408,7 @@ class ScubaFlowScene extends Phaser.Scene {
             for (let nb = -1; nb <= bCount; nb++) {
                 let bsx = nb * bStep - (camX * farFactor) % bStep;
                 let bwx = bsx + camX * farFactor;
-                let bf = getCaveFloorY(bwx);
+                let { floorY: bf } = this.getWallY(bwx);
                 if (bFirst) { fg.moveTo(bsx, 750); fg.lineTo(bsx, bf); bFirst = false; }
                 else { fg.lineTo(bsx, bf); }
             }
@@ -1483,8 +1427,7 @@ class ScubaFlowScene extends Phaser.Scene {
 
             // Each shape anchors to its own x for correct cave profile
             let worldX = sx + camX * farFactor;
-            let stalCeilFloor = getCaveFloorY(worldX);
-            let stalCeil = getCaveCeilY(worldX);
+            let { floorY: stalCeilFloor, ceilY: stalCeil } = this.getWallY(worldX);
             let channelH = stalCeilFloor - stalCeil;
             let maxH = Math.max(10, (channelH - 30) * 0.55); // leave ≥30px gap between tips
             let stalH = Math.min(maxH, 60 + Math.sin(i * 2.1) * 40);
@@ -1558,7 +1501,7 @@ class ScubaFlowScene extends Phaser.Scene {
             for (let nb = 0; nb <= nCount; nb++) {
                 let nwx = nBase + nb * nStep;
                 let nsx = nwx + camX * (1 - nearFactor);
-                let nc = getCaveCeilY(nwx);
+                let { ceilY: nc } = this.getWallY(nwx);
                 if (nFirst) { ng.moveTo(nsx, -50); ng.lineTo(nsx, nc); nFirst = false; }
                 else { ng.lineTo(nsx, nc); }
             }
@@ -1574,7 +1517,7 @@ class ScubaFlowScene extends Phaser.Scene {
             for (let nb = 0; nb <= nCount; nb++) {
                 let nwx = nBase + nb * nStep;
                 let nsx = nwx + camX * (1 - nearFactor);
-                let nf = getCaveFloorY(nwx);
+                let { floorY: nf } = this.getWallY(nwx);
                 if (nFirst) { ng.moveTo(nsx, 750); ng.lineTo(nsx, nf); nFirst = false; }
                 else { ng.lineTo(nsx, nf); }
             }
@@ -1593,8 +1536,7 @@ class ScubaFlowScene extends Phaser.Scene {
             let sampleX = worldX + Math.sin(i * 5.1) * 60;
 
             // Anchor each shape to its own screen x for correct cave profile
-            let nearFloor = getCaveFloorY(sampleX);
-            let nearCeil = getCaveCeilY(sampleX);
+            let { floorY: nearFloor, ceilY: nearCeil } = this.getWallY(sampleX);
             let channelH = nearFloor - nearCeil;
             let maxH = Math.max(10, (channelH - 30) * 0.55); // leave ≥30px gap between tips
             let stalH = Math.min(maxH, 85 + Math.sin(i * 1.7) * 55);
@@ -1727,405 +1669,107 @@ class ScubaFlowScene extends Phaser.Scene {
 
         let playerHue = (this.baseHue + 320) % 360; // Pink/Magenta base (distinct from buddy)
         let mainColor = this.hslToColorInt(playerHue / 360, flowSat, 0.55 + flowLightBoost);
-        let accentColor = this.hslToColorInt(((playerHue + 130) % 360) / 360, flowSat, 0.6 + flowLightBoost); // Neon Green/Yellow
+        let accentColor = this.hslToColorInt(((playerHue + 130) % 360) / 360, flowSat, 0.6 + flowLightBoost);
 
-        if (this.avatarType === 'diver') {
-            let glowRadius = 20 + this.V_lung * 8 + pulse * 8 + (this.visualMultiplier - 1) * 4;
-            g.fillStyle(mainColor, 0.08 + this.V_lung * 0.04 + pulse * 0.08);
-            g.fillCircle(0, 0, glowRadius);
+        let glowRadius = 20 + this.V_lung * 8 + pulse * 8 + (this.visualMultiplier - 1) * 4;
+        g.fillStyle(mainColor, 0.08 + this.V_lung * 0.04 + pulse * 0.08);
+        g.fillCircle(0, 0, glowRadius);
 
-            // --- AURA RINGS: concentric neon rings that grow with scoreMultiplier ---
-            // x1: none. x2-x7: rings. x8+: 7 rings.
-            let auraLevels = Math.min(this.visualMultiplier - 1, 7);
-            let visualSuperScale = Math.max(0, Math.min(6, this.scoreMultiplier - 9));
+        // --- AURA RINGS: concentric neon rings that grow with scoreMultiplier ---
+        // x1: none. x2-x7: rings. x8+: 7 rings.
+        let auraLevels = Math.min(this.visualMultiplier - 1, 7);
+        let visualSuperScale = Math.max(0, Math.min(6, this.scoreMultiplier - 9));
+        
+        for (let a = 0; a < auraLevels; a++) {
+            let auraHue = (this.baseHue + a * 75 + (visualSuperScale * 12)) % 360;
+            let auraColor = this.hslToColorInt(auraHue / 360, 1.0, 0.65);
             
-            for (let a = 0; a < auraLevels; a++) {
-                let auraHue = (this.baseHue + a * 75 + (visualSuperScale * 12)) % 360;
-                let auraColor = this.hslToColorInt(auraHue / 360, 1.0, 0.65);
-                
-                // Scale phase speed and amplitude dynamically with multiplier
-                let speedMult = 1.0 + visualSuperScale * 0.12;
-                let auraPhase = (this.elapsedTime * 0.003 * speedMult + a * 0.8) % (Math.PI * 2);
-                
-                let baseR = 32 + a * 18 + pulse * (10 + a * 5) + Math.sin(auraPhase) * 5;
-                let auraR = baseR + visualSuperScale * 1.5;
-                
-                let auraAlpha = 0.22 + pulse * 0.35 - a * 0.04;
-                if (visualSuperScale > 0) {
-                    auraAlpha = Math.min(0.9, auraAlpha + visualSuperScale * 0.04);
+            // Scale phase speed and amplitude dynamically with multiplier
+            let speedMult = 1.0 + visualSuperScale * 0.12;
+            let auraPhase = (this.elapsedTime * 0.003 * speedMult + a * 0.8) % (Math.PI * 2);
+            
+            let baseR = 32 + a * 18 + pulse * (10 + a * 5) + Math.sin(auraPhase) * 5;
+            let auraR = baseR + visualSuperScale * 1.5;
+            
+            let auraAlpha = 0.22 + pulse * 0.35 - a * 0.04;
+            if (visualSuperScale > 0) {
+                auraAlpha = Math.min(0.9, auraAlpha + visualSuperScale * 0.04);
+            }
+
+            // Draw jagged oscilloscope-like aura
+            let lineWidth = 1.2 + a * 0.5 + (visualSuperScale * 0.15);
+            g.lineStyle(lineWidth, auraColor, Math.max(0, auraAlpha));
+            g.beginPath();
+            let steps = 60;
+            for (let step = 0; step <= steps; step++) {
+                let angle = (step / steps) * Math.PI * 2;
+                // Multi-harmonic oscillation locked to angle and time
+                let freq1 = 4 + a;
+                let freq2 = 10 + a * 3;
+                let phase1 = angle * freq1 - (time * 0.005);
+                let phase2 = angle * freq2 + (time * 0.012);
+
+                let amp1 = 4 + pulse * 6;
+                let amp2 = 2 + pulse * 3;
+                let waveVal = Math.sin(phase1) * amp1 + (Math.abs(Math.sin(phase2)) - 0.5) * amp2 * 2;
+
+                // Modulate radius by localEnergy and flowState multiplier
+                let r = auraR + waveVal * (0.4 + this.localEnergy * 0.6);
+                let ax = Math.cos(angle) * r;
+                let ay = Math.sin(angle) * r;
+                if (step === 0) {
+                    g.moveTo(ax, ay);
+                } else {
+                    g.lineTo(ax, ay);
                 }
-
-                // Draw jagged oscilloscope-like aura
-                let lineWidth = 1.2 + a * 0.5 + (visualSuperScale * 0.15);
-                g.lineStyle(lineWidth, auraColor, Math.max(0, auraAlpha));
-                g.beginPath();
-                let steps = 60;
-                for (let step = 0; step <= steps; step++) {
-                    let angle = (step / steps) * Math.PI * 2;
-                    // Multi-harmonic oscillation locked to angle and time
-                    let freq1 = 4 + a;
-                    let freq2 = 10 + a * 3;
-                    let phase1 = angle * freq1 - (time * 0.005);
-                    let phase2 = angle * freq2 + (time * 0.012);
-
-                    let amp1 = 4 + pulse * 6;
-                    let amp2 = 2 + pulse * 3;
-                    let waveVal = Math.sin(phase1) * amp1 + (Math.abs(Math.sin(phase2)) - 0.5) * amp2 * 2;
-
-                    // Modulate radius by localEnergy and flowState multiplier
-                    let r = auraR + waveVal * (0.4 + this.localEnergy * 0.6);
-                    let ax = Math.cos(angle) * r;
-                    let ay = Math.sin(angle) * r;
-                    if (step === 0) {
-                        g.moveTo(ax, ay);
-                    } else {
-                        g.lineTo(ax, ay);
-                    }
-                }
-                g.strokePath();
-            }
-
-            // Masterful frog-kick calculation (highly visible large displacement)
-            let frogPhase = (this.elapsedTime / 350) % (Math.PI * 2);
-            let kickExtension = Math.max(0, Math.sin(frogPhase)); // 0 = flexed, 1 = extended
-
-            // --- 1. DRAW BACK LEG (LEG 2 - bent knee frog kick trim) ---
-            g.lineStyle(2.5, mainColor, 0.65); // slightly dimmer
-            let hip2X = -8, hip2Y = 0;
-            let knee2X = hip2X - (6 + kickExtension * 8);
-            let knee2Y = hip2Y - (12 - kickExtension * 8);
-            let foot2X = knee2X - (2 + kickExtension * 12);
-            let foot2Y = knee2Y - (10 - kickExtension * 10);
-
-            g.beginPath();
-            g.moveTo(hip2X, hip2Y);
-            g.lineTo(knee2X, knee2Y);
-            g.lineTo(foot2X, foot2Y);
-            g.strokePath();
-
-            // Back Fin (accent color, neon)
-            let finLength = 15;
-            let finWidth = 10;
-            g.fillStyle(accentColor, 0.85);
-            g.beginPath();
-            g.moveTo(foot2X, foot2Y);
-            g.lineTo(foot2X - finLength, foot2Y - finWidth / 2 + (1 - kickExtension) * 4);
-            g.lineTo(foot2X - finLength + 3, foot2Y + finWidth / 2 + (1 - kickExtension) * 4);
-            g.closePath();
-            g.fillPath();
-
-            // --- 2. DRAW DOUBLE TANKS (TWINSET - Cave diving standard horizontal trim) ---
-            g.lineStyle(1.2, accentColor, 1);
-            g.fillStyle(0x020514, 0.95);
-
-            // Tank 2 (upper cylinder in perspective)
-            g.fillRoundedRect(-22, -16, 24, 6, 2);
-            g.strokeRoundedRect(-22, -16, 24, 6, 2);
-
-            // Tank 1 (lower cylinder, closer to back)
-            g.fillRoundedRect(-22, -11, 24, 6, 2);
-            g.strokeRoundedRect(-22, -11, 24, 6, 2);
-
-            // Isolator Manifold connecting the two tanks at the valves (X = 2)
-            g.lineStyle(1.5, accentColor, 1);
-            g.beginPath();
-            g.moveTo(2, -13);
-            g.lineTo(2, -8);
-            g.strokePath();
-
-            // Metal tank bands holding them together
-            g.lineStyle(1.0, mainColor, 0.8);
-            g.beginPath();
-            // Band 1 (rear)
-            g.moveTo(-16, -16); g.lineTo(-16, -5);
-            // Band 2 (front)
-            g.moveTo(-6, -16); g.lineTo(-6, -5);
-            g.strokePath();
-
-            // Regulator hose starting from valve manifold area
-            g.lineStyle(1, accentColor, 0.8);
-            let p0x = 2, p0y = -11;
-            let cx = 8, cy = -16;
-            let p1x = 16, p1y = -3; // mouthpiece
-            g.beginPath();
-            g.moveTo(p0x, p0y);
-            // Draw smooth curve using quadratic Bezier approximation
-            for (let i = 1; i <= 4; i++) {
-                let t = i / 4;
-                let mt = 1 - t;
-                let x = mt * mt * p0x + 2 * mt * t * cx + t * t * p1x;
-                let y = mt * mt * p0y + 2 * mt * t * cy + t * t * p1y;
-                g.lineTo(x, y);
             }
             g.strokePath();
-
-            // --- 3. DRAW CHEST ---
-            let chestWidth = 28 + this.V_lung * 10;
-            g.lineStyle(2, mainColor, 1);
-            g.fillStyle(0x020514, 0.95);
-            g.fillEllipse(0, 0, chestWidth, 16);
-            g.strokeEllipse(0, 0, chestWidth, 16);
-
-            // Suit details
-            g.lineStyle(1.5, accentColor, 1);
-            g.strokeRect(-12, -12, 20, 5);
-
-            // --- 4. DRAW HEAD & MASK (Mask is neon colored) ---
-            g.lineStyle(2, mainColor, 1);
-            g.fillStyle(0x020514, 0.95);
-            g.fillCircle(14, -4, 6);
-            g.strokeCircle(14, -4, 6);
-
-            // Goggles Visor (glowing neon rounded visor)
-            g.fillStyle(accentColor, 0.85);
-            g.fillRoundedRect(15, -7, 4, 5, 1);
-
-            // Regulator mouthpiece
-            g.fillStyle(mainColor, 1);
-            g.fillRect(16, -3, 3, 3);
-
-            // --- 5. DRAW FRONT LEG (LEG 1 - frog kick trim) ---
-            g.lineStyle(2.5, mainColor, 1);
-            let hip1X = -10, hip1Y = 2;
-            let frogPhase2 = frogPhase + 0.25;
-            let kickExtension2 = Math.max(0, Math.sin(frogPhase2));
-            let knee1X = hip1X - (6 + kickExtension2 * 8);
-            let knee1Y = hip1Y - (12 - kickExtension2 * 8);
-            let foot1X = knee1X - (2 + kickExtension2 * 12);
-            let foot1Y = knee1Y - (10 - kickExtension2 * 10);
-
-            g.beginPath();
-            g.moveTo(hip1X, hip1Y);
-            g.lineTo(knee1X, knee1Y);
-            g.lineTo(foot1X, foot1Y);
-            g.strokePath();
-
-            // Front Fin (accent color, neon)
-            g.fillStyle(accentColor, 1.0);
-            g.beginPath();
-            g.moveTo(foot1X, foot1Y);
-            g.lineTo(foot1X - finLength, foot1Y - finWidth / 2 + (1 - kickExtension2) * 4);
-            g.lineTo(foot1X - finLength + 3, foot1Y + finWidth / 2 + (1 - kickExtension2) * 4);
-            g.closePath();
-            g.fillPath();
-
-            // --- 6. DRAW ARM & LIGHT (Masterful outstretched position holding primary light) ---
-            let shoulderX = 8, shoulderY = -2;
-            let elbowX = shoulderX + 10;
-            let elbowY = shoulderY;
-            let handX = elbowX + 8;
-            let handY = elbowY;
-
-            if (this.buddyState === 'relieved') {
-                // Raise arm to make "OK" hand signal
-                elbowX = shoulderX + 4;
-                elbowY = shoulderY - 8;
-                handX = elbowX + 6;
-                handY = elbowY - 6;
-            }
-
-            g.lineStyle(2.5, mainColor, 1);
-            g.beginPath();
-            g.moveTo(shoulderX, shoulderY);
-            g.lineTo(elbowX, elbowY);
-            g.lineTo(handX, handY);
-            g.strokePath();
-
-            // Primary Light Canister
-            g.lineStyle(1.5, accentColor, 1);
-            g.fillStyle(0x020514, 0.95);
-            g.fillRoundedRect(handX - 1, handY - 3, 6, 6, 1);
-            g.strokeRoundedRect(handX - 1, handY - 3, 6, 6, 1);
-
-
-
-        } else if (this.avatarType === 'fish') {
-            let glowRadius = 24 + this.V_lung * 8 + pulse * 8;
-            g.fillStyle(mainColor, 0.08 + this.V_lung * 0.04 + pulse * 0.08);
-            g.fillCircle(0, 0, glowRadius);
-
-            let bodyWidth = 28 + this.V_lung * 10;
-            let bodyHeight = 18;
-
-            g.lineStyle(2, mainColor, 1);
-            g.fillStyle(0x020514, 0.9);
-            g.fillEllipse(0, 0, bodyWidth, bodyHeight);
-            g.strokeEllipse(0, 0, bodyWidth, bodyHeight);
-
-            let tailPhase = Math.sin((this.elapsedTime / 140)) * 10;
-            g.lineStyle(2, accentColor, 1);
-            g.fillStyle(0x020514, 0.85);
-            g.beginPath();
-            g.moveTo(-bodyWidth / 2, 0);
-            g.lineTo(-bodyWidth / 2 - 15, -12 + tailPhase);
-            g.lineTo(-bodyWidth / 2 - 10, 0);
-            g.lineTo(-bodyWidth / 2 - 15, 12 + tailPhase);
-            g.closePath();
-            g.fillPath();
-            g.strokePath();
-
-            g.fillStyle(mainColor, 1);
-            g.fillCircle(bodyWidth / 2 - 8, -3, 2);
-
-            g.lineStyle(1.5, accentColor, 0.5 + this.V_lung * 0.5);
-            g.beginPath();
-            g.arc(-bodyWidth / 4 + 6, -3, 6, Math.PI * 0.75, Math.PI * 1.25);
-            g.strokePath();
-            g.beginPath();
-            g.arc(-bodyWidth / 4 + 9, -3, 6, Math.PI * 0.75, Math.PI * 1.25);
-            g.strokePath();
-
-        } else if (this.avatarType === 'turtle') {
-            let glowRadius = 26 + this.V_lung * 6 + pulse * 6;
-            g.fillStyle(mainColor, 0.08 + this.V_lung * 0.04 + pulse * 0.08);
-            g.fillCircle(0, 0, glowRadius);
-
-            let shellWidth = 32 + this.V_lung * 6;
-            let shellHeight = 22;
-
-            let swimPhase = Math.sin((this.elapsedTime / 200));
-            g.lineStyle(2, mainColor, 1);
-            g.fillStyle(0x020514, 0.9);
-
-            g.beginPath();
-            g.moveTo(6, -8);
-            g.lineTo(16 + swimPhase * 8, -22);
-            g.lineTo(6 + swimPhase * 6, -18);
-            g.closePath();
-            g.fillPath();
-            g.strokePath();
-
-            g.beginPath();
-            g.moveTo(6, 8);
-            g.lineTo(16 - swimPhase * 8, 22);
-            g.lineTo(6 - swimPhase * 6, 18);
-            g.closePath();
-            g.fillPath();
-            g.strokePath();
-
-            g.lineStyle(2, mainColor, 1);
-            g.fillStyle(0x010c06, 0.95);
-            g.fillEllipse(0, 0, shellWidth, shellHeight);
-            g.strokeEllipse(0, 0, shellWidth, shellHeight);
-
-            g.lineStyle(1, mainColor, 0.3);
-            g.strokeEllipse(0, 0, shellWidth - 8, shellHeight - 6);
-
-            g.lineStyle(1.5, mainColor, 1);
-            g.fillStyle(0x020514, 0.95);
-            g.fillCircle(shellWidth / 2 + 4, 0, 5);
-            g.strokeCircle(shellWidth / 2 + 4, 0, 5);
-
-        } else if (this.avatarType === 'jellyfish') {
-            let glowRadius = 22 + this.V_lung * 10 + pulse * 8;
-            g.fillStyle(mainColor, 0.08 + this.V_lung * 0.04 + pulse * 0.08);
-            g.fillCircle(0, 0, glowRadius);
-
-            let bellRadius = 16 + this.V_lung * 8;
-
-            g.lineStyle(2, mainColor, 1);
-            g.fillStyle(0x020514, 0.95);
-            g.beginPath();
-            g.arc(4, 0, bellRadius, -Math.PI / 2, Math.PI / 2);
-            g.lineTo(4, -bellRadius);
-            g.closePath();
-            g.fillPath();
-            g.strokePath();
-
-            g.lineStyle(1.5, accentColor, 0.5);
-            g.beginPath();
-            g.moveTo(4, -bellRadius + 3);
-            g.lineTo(4, bellRadius - 3);
-            g.strokePath();
-
-            g.lineStyle(1.5, mainColor, 0.7);
-            let tentacleCount = 4;
-            for (let i = 0; i < tentacleCount; i++) {
-                let offset = (i - (tentacleCount - 1) / 2) * 6;
-                let wavePhase = (this.elapsedTime / 180) + i;
-
-                g.beginPath();
-                g.moveTo(4, offset);
-
-                let step = 10;
-                let currentX = 4;
-                let currentY = offset;
-                for (let j = 0; j < 3; j++) {
-                    let nextX = currentX - step;
-                    let nextY = offset + Math.sin(wavePhase - j) * (6 + this.V_lung * 4);
-                    g.lineTo(nextX, nextY);
-                    currentX = nextX;
-                    currentY = nextY;
-                }
-                g.strokePath();
-            }
         }
+
+        this.drawDiverBody(g, false, mainColor, accentColor, this.V_lung, 26, -2, false);
     }
 
-    drawBuddyVisuals(time) {
-        let g = this.buddyGraphics;
-        g.clear();
-        let pulse = this.currentBeatPulse || 0;
+    drawDiverBody(g, isWireframe, mainColor, accentColor, lungVolume, handX = 26, handY = -2, hasReel = false) {
+        let { ke, ke2, foot1X, foot1Y, foot2X, foot2Y } = this.diverLimbs;
 
-        // Dynamic flow-state color popping based on silt-free multiplier
-        let flowSat = this.siltActive ? 0.15 : Math.min(1.0, 0.45 + (this.visualMultiplier - 1) * 0.08);
-        let flowLightBoost = this.siltActive ? -0.15 : Math.min(0.12, (this.visualMultiplier - 1) * 0.017);
-
-        // Cycle the buddy neon color (complementary hue)
-        let buddyHue = (this.baseHue + 180) % 360; // Cyan base (distinct from player)
-        let mainColor = this.hslToColorInt(buddyHue / 360, flowSat, 0.55 + flowLightBoost);
-        let accentColor = this.hslToColorInt(((buddyHue + 100) % 360) / 360, flowSat, 0.6 + flowLightBoost); // Violet/Orange
-
-        // Pure wireframe styling: buddy has a translucent glowing aura, but body parts are line-only
-        g.fillStyle(mainColor, 0.04);
-        g.fillCircle(0, 0, 20 + pulse * 6);
-
-        // Masterful frog-kick calculation for buddy (highly visible large displacement)
-        let frogPhase = (this.elapsedTime / 350) % (Math.PI * 2);
-        let kickExtension = Math.max(0, Math.sin(frogPhase)); // 0 = flexed, 1 = extended
-
-        // --- 1. DRAW BACK LEG (LEG 2 - bent knee frog kick trim) ---
-        g.lineStyle(2.5, mainColor, 0.65); // slightly dimmer
+        // 1. Draw Back Leg (Leg 2)
+        g.lineStyle(2.5, mainColor, 0.65);
         let hip2X = -8, hip2Y = 0;
-        let knee2X = hip2X - (6 + kickExtension * 8);
-        let knee2Y = hip2Y - (12 - kickExtension * 8);
-        let foot2X = knee2X - (2 + kickExtension * 12);
-        let foot2Y = knee2Y - (10 - kickExtension * 10);
-
+        let knee2X = hip2X - (6 + ke * 8);
+        let knee2Y = hip2Y - (12 - ke * 8);
         g.beginPath();
         g.moveTo(hip2X, hip2Y);
         g.lineTo(knee2X, knee2Y);
         g.lineTo(foot2X, foot2Y);
         g.strokePath();
 
-        // Back Fin (accent color, neon - wireframe only)
-        let finLength = 15;
-        let finWidth = 10;
-        g.lineStyle(1.5, accentColor, 0.7);
+        // Back Fin
+        let finLength = 15, finWidth = 10;
+        let finWarp = (1 - ke) * 4;
+        g.lineStyle(1.5, accentColor, isWireframe ? 0.7 : 1.0);
+        if (!isWireframe) g.fillStyle(accentColor, 0.85);
         g.beginPath();
         g.moveTo(foot2X, foot2Y);
-        g.lineTo(foot2X - finLength, foot2Y - finWidth / 2 + (1 - kickExtension) * 4);
-        g.lineTo(foot2X - finLength + 3, foot2Y + finWidth / 2 + (1 - kickExtension) * 4);
+        g.lineTo(foot2X - finLength, foot2Y - finWidth / 2 + finWarp);
+        g.lineTo(foot2X - finLength + 3, foot2Y + finWidth / 2 + finWarp);
         g.closePath();
+        if (!isWireframe) g.fillPath();
         g.strokePath();
 
-        // --- 2. DRAW DOUBLE TANKS (TWINSET - Wireframe style, horizontal trim) ---
-        g.lineStyle(1.2, accentColor, 0.95);
-
-        // Tank 2 (upper cylinder in perspective)
+        // 2. Double Tanks (Twinset)
+        g.lineStyle(1.2, accentColor, isWireframe ? 0.95 : 1.0);
+        if (!isWireframe) {
+            g.fillStyle(0x020514, 0.95);
+            g.fillRoundedRect(-22, -16, 24, 6, 2);
+            g.fillRoundedRect(-22, -11, 24, 6, 2);
+        }
         g.strokeRoundedRect(-22, -16, 24, 6, 2);
-
-        // Tank 1 (lower cylinder, closer to back)
         g.strokeRoundedRect(-22, -11, 24, 6, 2);
 
-        // Isolator Manifold connecting the two tanks at the valves
+        // Isolator manifold & tank bands
         g.lineStyle(1.5, accentColor, 0.95);
-        g.beginPath();
-        g.moveTo(2, -13);
-        g.lineTo(2, -8);
-        g.strokePath();
+        g.beginPath(); g.moveTo(2, -13); g.lineTo(2, -8); g.strokePath();
 
-        // Metal tank bands holding them together
         g.lineStyle(1.0, mainColor, 0.7);
         g.beginPath();
         g.moveTo(-16, -16); g.lineTo(-16, -5);
@@ -2133,129 +1777,140 @@ class ScubaFlowScene extends Phaser.Scene {
         g.strokePath();
 
         // Regulator hose
-        g.lineStyle(1, accentColor, 0.8);
-        let bp0x = 2, bp0y = -11;
-        let bcx = 8, bcy = -16;
-        let bp1x = 16, bp1y = -3;
+        g.lineStyle(1.0, accentColor, 0.8);
         g.beginPath();
-        g.moveTo(bp0x, bp0y);
+        g.moveTo(2, -11);
         for (let i = 1; i <= 4; i++) {
-            let t = i / 4;
-            let mt = 1 - t;
-            let x = mt * mt * bp0x + 2 * mt * t * bcx + t * t * bp1x;
-            let y = mt * mt * bp0y + 2 * mt * t * bcy + t * t * bp1y;
+            let t = i / 4, mt = 1 - t;
+            let x = mt * mt * 2 + 2 * mt * t * 8 + t * t * 16;
+            let y = mt * mt * -11 + 2 * mt * t * -16 + t * t * -3;
             g.lineTo(x, y);
         }
         g.strokePath();
 
-        // --- 3. DRAW CHEST (Wireframe - stroke only) ---
+        // 3. Torso & Chest
         g.lineStyle(2, mainColor, 1.0);
-        g.strokeEllipse(0, 0, 32, 16);
+        if (!isWireframe) {
+            g.fillStyle(0x020514, 0.95);
+            g.fillEllipse(-4, 0, 16, 12);
+        }
+        g.strokeEllipse(-4, 0, 16, 12);
 
-        // Suit details
-        g.lineStyle(1.5, accentColor, 0.9);
-        g.strokeRect(-12, -12, 20, 5);
+        let chestW = 10 + lungVolume * 8;
+        let chestH = 8 + lungVolume * 6;
+        g.lineStyle(1.2, accentColor, 0.6 + lungVolume * 0.4);
+        if (!isWireframe) {
+            g.fillStyle(mainColor, 0.15 + lungVolume * 0.25);
+            g.fillEllipse(-2, 0, chestW, chestH);
+        }
+        g.strokeEllipse(-2, 0, chestW, chestH);
 
-        // Safety Reel spool (carried by buddy, cave diving protocol - wireframe style)
-        let reelX = -4, reelY = 6;
-        g.lineStyle(1.5, accentColor, 1.0);
-        g.strokeCircle(reelX, reelY, 6);
-        g.strokeCircle(reelX, reelY, 2);
-        g.beginPath();
-        g.moveTo(reelX - 6, reelY); g.lineTo(reelX + 6, reelY);
-        g.moveTo(reelX, reelY - 6); g.lineTo(reelX, reelY + 6);
-        g.strokePath();
+        // Safety Reel spool (carried by buddy, cave diving protocol)
+        if (hasReel) {
+            let reelX = -4, reelY = 6;
+            g.lineStyle(1.5, accentColor, 1.0);
+            g.strokeCircle(reelX, reelY, 6);
+            g.strokeCircle(reelX, reelY, 2);
+            g.beginPath();
+            g.moveTo(reelX - 6, reelY); g.lineTo(reelX + 6, reelY);
+            g.moveTo(reelX, reelY - 6); g.lineTo(reelX, reelY + 6);
+            g.strokePath();
+        }
 
-        // --- 4. DRAW HEAD & MASK (Wireframe - stroke only) ---
-        g.lineStyle(2, mainColor, 1.0);
-        g.strokeCircle(14, -4, 6);
-
-        // Goggles Visor (wireframe visor)
-        g.lineStyle(1.5, accentColor, 0.95);
-        g.strokeRoundedRect(15, -7, 4, 5, 1);
-
-        // Regulator mouthpiece
-        g.lineStyle(1.5, mainColor, 1.0);
-        g.strokeRect(16, -3, 3, 3);
-
-        // --- 5. DRAW FRONT LEG (LEG 1 - frog kick trim) ---
-        g.lineStyle(2.5, mainColor, 1);
+        // 4. Leg 1 (Front leg)
+        g.lineStyle(2.5, mainColor, 1.0);
         let hip1X = -10, hip1Y = 2;
-        let frogPhase2 = frogPhase + 0.25;
-        let kickExtension2 = Math.max(0, Math.sin(frogPhase2));
-        let knee1X = hip1X - (6 + kickExtension2 * 8);
-        let knee1Y = hip1Y - (12 - kickExtension2 * 8);
-        let foot1X = knee1X - (2 + kickExtension2 * 12);
-        let foot1Y = knee1Y - (10 - kickExtension2 * 10);
-
+        let knee1X = hip1X - (6 + ke2 * 8);
+        let knee1Y = hip1Y - (12 - ke2 * 8);
         g.beginPath();
         g.moveTo(hip1X, hip1Y);
         g.lineTo(knee1X, knee1Y);
         g.lineTo(foot1X, foot1Y);
         g.strokePath();
 
-        // Front Fin (accent color, neon - wireframe only)
+        // Front Fin
+        let finWarp2 = (1 - ke2) * 4;
         g.lineStyle(1.5, accentColor, 1.0);
+        if (!isWireframe) g.fillStyle(accentColor, 0.95);
         g.beginPath();
         g.moveTo(foot1X, foot1Y);
-        g.lineTo(foot1X - finLength, foot1Y - finWidth / 2 + (1 - kickExtension2) * 4);
-        g.lineTo(foot1X - finLength + 3, foot1Y + finWidth / 2 + (1 - kickExtension2) * 4);
+        g.lineTo(foot1X - finLength, foot1Y - finWidth / 2 + finWarp2);
+        g.lineTo(foot1X - finLength + 3, foot1Y + finWidth / 2 + finWarp2);
         g.closePath();
+        if (!isWireframe) g.fillPath();
         g.strokePath();
 
-        // --- 6. DRAW ARM & LIGHT (Masterful outstretched position holding primary light) ---
-        let shoulderX = 8, shoulderY = -2;
-        let elbowX = shoulderX + 10;
-        let elbowY = shoulderY;
-        let handX = elbowX + 8;
-        let handY = elbowY;
-
-        if (this.buddyState === 'assisting') {
-            // Raise arm to make "OK" hand signal
-            elbowX = shoulderX + 4;
-            elbowY = shoulderY - 8;
-            handX = elbowX + 6;
-            handY = elbowY - 6;
+        // 5. Head & Mask
+        g.lineStyle(1.5, mainColor, 1.0);
+        if (!isWireframe) {
+            g.fillStyle(0x020514, 0.95);
+            g.fillCircle(14, -4, 4);
         }
+        g.strokeCircle(14, -4, 4);
 
-        g.lineStyle(2.5, mainColor, 1.0);
+        g.lineStyle(1.2, accentColor, 1.0);
+        if (!isWireframe) {
+            g.fillStyle(accentColor, 0.4);
+            g.fillRoundedRect(16, -6, 5, 4, 1);
+        }
+        g.strokeRoundedRect(16, -6, 5, 4, 1);
+
+        g.lineStyle(1, mainColor, 0.6);
+        g.beginPath();
+        g.arc(14, -4, 5, Math.PI * 0.6, Math.PI * 1.4);
+        g.strokePath();
+
+        // 6. Arm & Torch Canister
+        g.lineStyle(2, mainColor, 0.9);
+        let shoulderX = 4, shoulderY = -3;
+        let elbowX = (shoulderX + handX) / 2 - 2;
+        let elbowY = Math.max(shoulderY, handY) + 5;
         g.beginPath();
         g.moveTo(shoulderX, shoulderY);
         g.lineTo(elbowX, elbowY);
         g.lineTo(handX, handY);
         g.strokePath();
 
-        // Primary Light Canister (Wireframe)
         g.lineStyle(1.5, accentColor, 1.0);
+        if (!isWireframe) {
+            g.fillStyle(0x020514, 0.95);
+            g.fillRoundedRect(handX - 1, handY - 3, 6, 6, 1);
+        }
         g.strokeRoundedRect(handX - 1, handY - 3, 6, 6, 1);
     }
 
+    drawBuddyVisuals(time) {
+        let g = this.buddyGraphics;
+        g.clear();
+        let pulse = this.currentBeatPulse || 0;
+
+        let flowSat = this.siltActive ? 0.15 : Math.min(1.0, 0.45 + (this.visualMultiplier - 1) * 0.08);
+        let flowLightBoost = this.siltActive ? -0.15 : Math.min(0.12, (this.visualMultiplier - 1) * 0.017);
+
+        let buddyHue = (this.baseHue + 180) % 360;
+        let mainColor = this.hslToColorInt(buddyHue / 360, flowSat, 0.55 + flowLightBoost);
+        let accentColor = this.hslToColorInt(((buddyHue + 100) % 360) / 360, flowSat, 0.6 + flowLightBoost);
+
+        g.fillStyle(mainColor, 0.04);
+        g.fillCircle(0, 0, 20 + pulse * 6);
+
+        let handX = (this.buddyState === 'assisting') ? 18 : 26;
+        let handY = (this.buddyState === 'assisting') ? -16 : -2;
+
+        this.drawDiverBody(g, true, mainColor, accentColor, 0.5, handX, handY, true);
+    }
+
     getBuddyCheckPoints(scaleX) {
-        let frogPhase = (this.elapsedTime / 350) % (Math.PI * 2);
-        let kickExtension = Math.max(0, Math.sin(frogPhase));
-        let frogPhase2 = frogPhase + 0.25;
-        let kickExtension2 = Math.max(0, Math.sin(frogPhase2));
+        let handX = (this.buddyState === 'assisting') ? 18 : 26;
+        let handY = (this.buddyState === 'assisting') ? -16 : -2;
 
-        let foot2X = -8 - (6 + kickExtension * 8) - (2 + kickExtension * 12);
-        let foot2Y = -6 - (12 - kickExtension * 8) - (10 - kickExtension * 10);
-
-        let foot1X = -10 - (6 + kickExtension2 * 8) - (2 + kickExtension2 * 12);
-        let foot1Y = 2 - (12 - kickExtension2 * 8) - (10 - kickExtension2 * 10);
-
-        let handX = 26;
-        let handY = -2;
-        if (this.buddyState === 'assisting') {
-            handX = 18;
-            handY = -16;
-        }
-
-        return [
-            { x: 0, y: 0, r: 10 },                         // Torso
-            { x: 14 * scaleX, y: -4, r: 6 },               // Head
-            { x: handX * scaleX, y: handY, r: 5 },          // Hand/Light
-            { x: foot1X * scaleX, y: foot1Y, r: 8 },       // Foot 1 + Fin (increased to 8 to cover fin)
-            { x: foot2X * scaleX, y: foot2Y, r: 8 }        // Foot 2 + Fin
-        ];
+        let pts = this.buddyCheckPoints;
+        pts[0].x = 0; pts[0].y = 0; pts[0].r = 10;
+        pts[1].x = 14 * scaleX; pts[1].y = -4; pts[1].r = 6;
+        pts[2].x = handX * scaleX; pts[2].y = handY; pts[2].r = 5;
+        pts[3].x = this.diverLimbs.foot1X * scaleX; pts[3].y = this.diverLimbs.foot1Y; pts[3].r = 8;
+        pts[4].x = this.diverLimbs.foot2X * scaleX; pts[4].y = this.diverLimbs.foot2Y; pts[4].r = 8;
+        return pts;
     }
 
     drawCaveLights() {
@@ -2314,12 +1969,7 @@ class ScubaFlowScene extends Phaser.Scene {
             let yBottom = y0 + ratio * beamSpread;
 
             // Cave boundaries at x
-            let t = (x / this.baseScrollSpeed) * 1000;
-            let pathY = this.getTargetYAtTime(t);
-            let energy = this.getEnergyAtTime(t);
-            let { floorOffset, ceilOffset } = this.getWallOffsets(x, energy);
-            let floorLimitY = pathY + floorOffset;
-            let ceilLimitY = pathY - ceilOffset;
+            let { floorY: floorLimitY, ceilY: ceilLimitY } = this.getWallY(x);
 
             // Constrain Y to physical walls at this step
             let cTop = Math.max(yTop, ceilLimitY);
@@ -2413,7 +2063,6 @@ class ScubaFlowScene extends Phaser.Scene {
         g.beginPath();
 
         let first = true;
-        let points = [];
         let blendRange = 150; // Smooth blending over the last 150px before the reel
 
         for (let x = startX; x <= endX; x += 15) {
@@ -2425,7 +2074,6 @@ class ScubaFlowScene extends Phaser.Scene {
             let blend = distToReel < blendRange ? (1 - distToReel / blendRange) : 0;
             let y = pathY * (1 - blend) + reelWorldY * blend;
 
-            points.push({ x: x, y: y });
             if (first) {
                 g.moveTo(x, y);
                 first = false;
@@ -2487,19 +2135,10 @@ class ScubaFlowScene extends Phaser.Scene {
         let startX = this.cameras.main.scrollX - 100;
         let endX = startX + 1400;
 
-        const getWallY = (wx) => {
-            let t = (wx / this.baseScrollSpeed) * 1000;
-            let targetY = this.getTargetYAtTime(t);
-            let localEnergy = this.getEnergyAtTime(t);
-
-            let { floorOffset, ceilOffset } = this.getWallOffsets(wx, localEnergy);
-            return { floorY: targetY + floorOffset, ceilY: targetY - ceilOffset };
-        };
-
         // Generate base points with zero allocation GC cache
         let idx = 0;
         for (let x = startX; x <= endX; x += 30) {
-            let { floorY, ceilY } = getWallY(x);
+            let { floorY, ceilY } = this.getWallY(x);
             if (!this.floorPoints[idx]) {
                 this.floorPoints[idx] = { x: 0, y: 0 };
                 this.ceilPoints[idx] = { x: 0, y: 0 };
@@ -2571,28 +2210,26 @@ class ScubaFlowScene extends Phaser.Scene {
             let numCracksF = Math.floor(1 + this._seededRnd(slot * 23 + 5) * 3); // 1, 2, or 3 cracks
             for (let cIdx = 0; cIdx < numCracksF; cIdx++) {
                 let seed = slot * 31 + cIdx * 97 + 5;
-                let rVal = this._seededRnd(seed);
-                if (rVal > 0.75) continue; // 75% chance per candidate crack to keep density balanced
+                if (this._seededRnd(seed) > 0.75) continue; // 75% chance per candidate crack
 
                 let cx = slot * SLOT_SIZE + this._seededRnd(seed + 1) * SLOT_SIZE * 0.9 - SLOT_SIZE * 0.45;
-                let { floorY } = getWallY(cx);
+                let { floorY } = this.getWallY(cx);
 
                 if (this.plumeEmitter && this._seededRnd(seed + 12) < 0.4) {
                     let plumeHue = (floorHue + 20) % 360;
                     let plumeColor = this.hslToColorInt(plumeHue / 360, 0.9, 0.6);
                     
-                    // Dynamic scaling of vents based on Flow multiplier
                     let mult = this.visualMultiplier || 1;
-                    let ventScaleStart = 1.0 + (mult - 1) * 0.3; // x1: 1.0, x8: 3.1
-                    let ventScaleEnd = 2.5 + (mult - 1) * 1.0;   // x1: 2.5, x8: 9.5
-                    let ventAlpha = 0.06 + (mult - 1) * 0.02;    // x1: 0.06, x8: 0.20
-                    let emitChance = 0.06 + (mult - 1) * 0.02;    // x1: 0.06, x8: 0.20
+                    let ventScaleStart = 1.0 + (mult - 1) * 0.3;
+                    let ventScaleEnd = 2.5 + (mult - 1) * 1.0;
+                    let ventAlpha = 0.06 + (mult - 1) * 0.02;
+                    let emitChance = 0.06 + (mult - 1) * 0.02;
                     
                     if (!this.countdownActive && Math.random() < emitChance) {
                         this.plumeEmitter.particleTint = plumeColor;
                         this.plumeEmitter.emitParticleAt(cx, floorY, 1, {
                             scale: { start: ventScaleStart, end: ventScaleEnd },
-                            alpha: { start: Math.min(0.9, ventAlpha * 5.5), end: 0 }, // 5.5x multiplier for visibility
+                            alpha: { start: Math.min(0.9, ventAlpha * 5.5), end: 0 },
                             lifespan: { min: 1800, max: 2800 },
                             speedY: { min: -150, max: -70 },
                             speedX: { min: -this.scrollSpeed * 0.5 - 15, max: -this.scrollSpeed * 0.5 + 15 }
@@ -2600,132 +2237,18 @@ class ScubaFlowScene extends Phaser.Scene {
                     }
                 }
 
-                // Vertical depth into floor rock: 12px to 160px
-                let depth = 12 + this._seededRnd(seed + 2) * 148;
-                let cy = floorY + depth;
-
-                let w = 8 + this._seededRnd(seed + 3) * 82; // 8px to 90px wide
-                let h = 4 + this._seededRnd(seed + 4) * 36; // 4px to 40px vertical displacement (irregularity)
-
-                let segments = Math.floor(3 + this._seededRnd(seed + 5) * 4); // 3 to 6 segments
-                let branchAt = this._seededRnd(seed + 6) > 0.5 ? Math.floor(1 + this._seededRnd(seed + 7) * (segments - 2)) : -1;
-
-                let thickness = 0.6 + this._seededRnd(seed + 8) * 1.6; // some hairline, some thick
-                let alphaScale = 0.15 + this._seededRnd(seed + 9) * 0.4;
-                g.lineStyle(thickness, floorColor, (alphaScale + flowFill * 0.22));
-
-                g.beginPath();
-                let prevX = cx - w / 2;
-                let prevY = cy;
-                g.moveTo(prevX, prevY);
-
-                let branchStartX = 0;
-                let branchStartY = 0;
-
-                for (let step = 0; step < segments; step++) {
-                    let progress = (step + 1) / segments;
-                    let targetSegX = cx - w / 2 + progress * w;
-                    let targetSegY = cy + (this._seededRnd(seed + 10 + step) - 0.5) * h;
-                    g.lineTo(targetSegX, targetSegY);
-
-                    if (step === branchAt) {
-                        branchStartX = targetSegX;
-                        branchStartY = targetSegY;
-                    }
-
-                    prevX = targetSegX;
-                    prevY = targetSegY;
-                }
-                g.strokePath();
-
-                // Draw secondary branch
-                if (branchAt !== -1) {
-                    let branchW = w * (0.3 + this._seededRnd(seed + 20) * 0.4);
-                    let branchH = h * (0.3 + this._seededRnd(seed + 21) * 0.4);
-                    let branchDirY = this._seededRnd(seed + 22) > 0.5 ? 1 : -1;
-
-                    g.lineStyle(thickness * 0.6, floorColor, (alphaScale + flowFill * 0.22) * 0.7);
-                    g.beginPath();
-                    g.moveTo(branchStartX, branchStartY);
-
-                    let bSegments = Math.floor(2 + this._seededRnd(seed + 23) * 3);
-                    for (let step = 0; step < bSegments; step++) {
-                        let progress = (step + 1) / bSegments;
-                        let targetSegX = branchStartX + progress * branchW;
-                        let targetSegY = branchStartY + branchDirY * progress * branchH + (this._seededRnd(seed + 24 + step) - 0.5) * branchH * 0.5;
-                        g.lineTo(targetSegX, targetSegY);
-                    }
-                    g.strokePath();
-                }
+                this.drawRockCrack(g, cx, floorY, true, floorColor, seed, flowFill);
             }
 
             // 2. Cracks on Ceiling rock face
             let numCracksC = Math.floor(1 + this._seededRnd(slot * 37 + 12) * 3);
             for (let cIdx = 0; cIdx < numCracksC; cIdx++) {
                 let seed = slot * 43 + cIdx * 103 + 12;
-                let rVal = this._seededRnd(seed);
-                if (rVal > 0.75) continue;
+                if (this._seededRnd(seed) > 0.75) continue;
 
                 let cx = slot * SLOT_SIZE + this._seededRnd(seed + 1) * SLOT_SIZE * 0.9 - SLOT_SIZE * 0.45;
-                let { ceilY } = getWallY(cx);
-
-                // Vertical depth into ceiling rock: 12px to 160px
-                let depth = 12 + this._seededRnd(seed + 2) * 148;
-                let cy = ceilY - depth;
-
-                let w = 8 + this._seededRnd(seed + 3) * 82;
-                let h = 4 + this._seededRnd(seed + 4) * 36;
-
-                let segments = Math.floor(3 + this._seededRnd(seed + 5) * 4);
-                let branchAt = this._seededRnd(seed + 6) > 0.5 ? Math.floor(1 + this._seededRnd(seed + 7) * (segments - 2)) : -1;
-
-                let thickness = 0.6 + this._seededRnd(seed + 8) * 1.6;
-                let alphaScale = 0.15 + this._seededRnd(seed + 9) * 0.4;
-                g.lineStyle(thickness, ceilColor, (alphaScale + flowFill * 0.22));
-
-                g.beginPath();
-                let prevX = cx - w / 2;
-                let prevY = cy;
-                g.moveTo(prevX, prevY);
-
-                let branchStartX = 0;
-                let branchStartY = 0;
-
-                for (let step = 0; step < segments; step++) {
-                    let progress = (step + 1) / segments;
-                    let targetSegX = cx - w / 2 + progress * w;
-                    let targetSegY = cy + (this._seededRnd(seed + 10 + step) - 0.5) * h;
-                    g.lineTo(targetSegX, targetSegY);
-
-                    if (step === branchAt) {
-                        branchStartX = targetSegX;
-                        branchStartY = targetSegY;
-                    }
-
-                    prevX = targetSegX;
-                    prevY = targetSegY;
-                }
-                g.strokePath();
-
-                // Draw secondary branch
-                if (branchAt !== -1) {
-                    let branchW = w * (0.3 + this._seededRnd(seed + 20) * 0.4);
-                    let branchH = h * (0.3 + this._seededRnd(seed + 21) * 0.4);
-                    let branchDirY = this._seededRnd(seed + 22) > 0.5 ? -1 : 1; // go deeper/higher into rock
-
-                    g.lineStyle(thickness * 0.6, ceilColor, (alphaScale + flowFill * 0.22) * 0.7);
-                    g.beginPath();
-                    g.moveTo(branchStartX, branchStartY);
-
-                    let bSegments = Math.floor(2 + this._seededRnd(seed + 23) * 3);
-                    for (let step = 0; step < bSegments; step++) {
-                        let progress = (step + 1) / bSegments;
-                        let targetSegX = branchStartX + progress * branchW;
-                        let targetSegY = branchStartY + branchDirY * progress * branchH + (this._seededRnd(seed + 24 + step) - 0.5) * branchH * 0.5;
-                        g.lineTo(targetSegX, targetSegY);
-                    }
-                    g.strokePath();
-                }
+                let { ceilY } = this.getWallY(cx);
+                this.drawRockCrack(g, cx, ceilY, false, ceilColor, seed, flowFill);
             }
         }
 
@@ -2734,6 +2257,54 @@ class ScubaFlowScene extends Phaser.Scene {
 
         // Draw cave safety line guideline attached to buddy's reel
         this.drawGuideLine();
+    }
+
+    drawRockCrack(g, cx, wallY, isFloor, color, seed, flowFill) {
+        let depth = 12 + this._seededRnd(seed + 2) * 148;
+        let cy = isFloor ? wallY + depth : wallY - depth;
+        let w = 8 + this._seededRnd(seed + 3) * 82;
+        let h = 4 + this._seededRnd(seed + 4) * 36;
+        let segments = Math.floor(3 + this._seededRnd(seed + 5) * 4);
+        let branchAt = this._seededRnd(seed + 6) > 0.5 ? Math.floor(1 + this._seededRnd(seed + 7) * (segments - 2)) : -1;
+        let thickness = 0.6 + this._seededRnd(seed + 8) * 1.6;
+        let alphaScale = 0.15 + this._seededRnd(seed + 9) * 0.4;
+
+        g.lineStyle(thickness, color, alphaScale + flowFill * 0.22);
+        g.beginPath();
+        g.moveTo(cx - w / 2, cy);
+
+        let branchStartX = 0;
+        let branchStartY = 0;
+        for (let step = 0; step < segments; step++) {
+            let progress = (step + 1) / segments;
+            let targetSegX = cx - w / 2 + progress * w;
+            let targetSegY = cy + (this._seededRnd(seed + 10 + step) - 0.5) * h;
+            g.lineTo(targetSegX, targetSegY);
+            if (step === branchAt) {
+                branchStartX = targetSegX;
+                branchStartY = targetSegY;
+            }
+        }
+        g.strokePath();
+
+        if (branchAt !== -1) {
+            let branchW = w * (0.3 + this._seededRnd(seed + 20) * 0.4);
+            let branchH = h * (0.3 + this._seededRnd(seed + 21) * 0.4);
+            let branchDirY = this._seededRnd(seed + 22) > 0.5 ? (isFloor ? 1 : -1) : (isFloor ? -1 : 1);
+
+            g.lineStyle(thickness * 0.6, color, (alphaScale + flowFill * 0.22) * 0.7);
+            g.beginPath();
+            g.moveTo(branchStartX, branchStartY);
+
+            let bSegments = Math.floor(2 + this._seededRnd(seed + 23) * 3);
+            for (let step = 0; step < bSegments; step++) {
+                let progress = (step + 1) / bSegments;
+                let targetSegX = branchStartX + progress * branchW;
+                let targetSegY = branchStartY + branchDirY * progress * branchH + (this._seededRnd(seed + 24 + step) - 0.5) * branchH * 0.5;
+                g.lineTo(targetSegX, targetSegY);
+            }
+            g.strokePath();
+        }
     }
 
     // Seeded pseudo-random based on integer seed — fast, deterministic, no Math.random()
@@ -2812,12 +2383,7 @@ class ScubaFlowScene extends Phaser.Scene {
             let ow = 28 + this._seededRnd(slot * 41 + 1) * (isWindow ? 55 : 35);
             let od = 28 + this._seededRnd(slot * 53 + 5) * (isWindow ? 70 : 40);
 
-            let t = (cx / this.baseScrollSpeed) * 1000;
-            let targetY = this.getTargetYAtTime(t);
-            let energy = this.getEnergyAtTime(t);
-            let { floorOffset, ceilOffset } = this.getWallOffsets(cx, energy);
-            let floorY = targetY + floorOffset;
-            let ceilY = targetY - ceilOffset;
+            let { floorY, ceilY } = this.getWallY(cx);
 
             // Rock color for this opening's rim
             let rimHue = onFloor ? floorHue : ceilHue;
@@ -2950,25 +2516,7 @@ class ScubaFlowScene extends Phaser.Scene {
     checkCollisions() {
         let targetAlpha = this.siltActive ? 0.12 : 0.95;
 
-        // Build body hitbox list (mirrors update() collision checkpoints)
-        let collectPts = [{ x: 0, y: 0, r: 6.5 }]; // fallback for non-diver
-        if (this.avatarType === 'diver') {
-            let frogPhase = (this.elapsedTime / 350) % (Math.PI * 2);
-            let ke = Math.max(0, Math.sin(frogPhase));
-            let ke2 = Math.max(0, Math.sin(frogPhase + 0.25));
-            let f2x = -8 - (6 + ke * 8) - (2 + ke * 12);
-            let f2y = -6 - (12 - ke * 8) - (10 - ke * 10);
-            let f1x = -10 - (6 + ke2 * 8) - (2 + ke2 * 12);
-            let f1y = 2 - (12 - ke2 * 8) - (10 - ke2 * 10);
-            collectPts = [
-                { x: 0, y: 0, r: 6.5 },  // torso
-                { x: 14, y: -4, r: 4 },    // head
-                { x: -10, y: -13, r: 2 },    // tank
-                { x: 26, y: -2, r: 3 },    // hand
-                { x: f1x, y: f1y, r: 4 },    // foot 1 + fin
-                { x: f2x, y: f2y, r: 4 },    // foot 2 + fin
-            ];
-        }
+        let collectPts = this.playerCheckPoints;
 
         this.collectiblesGroup.children.iterate((debris) => {
             if (!debris) return;
@@ -3269,6 +2817,15 @@ class ScubaFlowScene extends Phaser.Scene {
     }
 
     // --- LEVEL PARSING & HELPERS ---
+
+    isBreathingIn() {
+        if (this.useAutopilot) {
+            return this.simulatedSpaceDown;
+        }
+        const keyboardDown = Boolean(this.spaceKey && this.spaceKey.isDown);
+        const pointerDown = Boolean(this.input && this.input.activePointer && this.input.activePointer.isDown);
+        return keyboardDown || pointerDown;
+    }
 
     getTargetYAtTime(timeMs) {
         let path = this.levelData.path;
@@ -4026,29 +3583,11 @@ class ScubaFlowScene extends Phaser.Scene {
         // Temporarily set levelData.path so helper methods like getWallOffsets and getEnergyAtTime can be used
         this.levelData = { path: path };
 
-        const getInterpolatedPathY = (timeMs) => {
-            if (timeMs <= path[0].time) return path[0].y;
-            if (timeMs >= path[path.length - 1].time) return path[path.length - 1].y;
-            for (let idx = 0; idx < path.length - 1; idx++) {
-                let k0 = path[idx];
-                let k1 = path[idx + 1];
-                if (timeMs >= k0.time && timeMs <= k1.time) {
-                    let ratio = (timeMs - k0.time) / (k1.time - k0.time);
-                    return k0.y + (k1.y - k0.y) * ratio;
-                }
-            }
-            return 350;
-        };
-
         const getClampedCollectibleY = (colTime, offset) => {
-            let colTimeAtX = colTime + (250 / this.baseScrollSpeed) * 1000;
-            let colPathY = getInterpolatedPathY(colTimeAtX);
             let colX = (colTime / 1000) * this.baseScrollSpeed + 250;
-            let localEnergy = this.getEnergyAtTime(colTimeAtX);
-            let { floorOffset, ceilOffset } = this.getWallOffsets(colX, localEnergy);
-            let targetColY = colPathY + offset;
-            // Clamp Y to be at least 40px away from ceiling and floor
-            return Phaser.Math.Clamp(targetColY, colPathY - ceilOffset + 40, colPathY + floorOffset - 40);
+            let targetColY = this.getTargetYAtTime((colX / this.baseScrollSpeed) * 1000) + offset;
+            let { floorY, ceilY } = this.getWallY(colX);
+            return Phaser.Math.Clamp(targetColY, ceilY + 40, floorY - 40);
         };
 
         let forceSpawnThreshold = spacerTime * 1.2;
@@ -4442,18 +3981,17 @@ class ScubaFlowScene extends Phaser.Scene {
             let ptTop = testLight.topPoints[i];
             let ptBottom = testLight.bottomPoints[i];
             let tx = ptTop.x;
-            let tt = (tx / this.baseScrollSpeed) * 1000;
-            let tPathY = this.getTargetYAtTime(tt);
-            let tEnergy = this.getEnergyAtTime(tt);
-            let { floorOffset, ceilOffset } = this.getWallOffsets(tx, tEnergy);
-            let tFloorLimitY = tPathY + floorOffset;
-            let tCeilLimitY = tPathY - ceilOffset;
+            let { floorY: tFloorLimitY, ceilY: tCeilLimitY } = this.getWallY(tx);
 
             console.assert(ptTop.y >= tCeilLimitY, `Assertion Failed: topPoint Y (${ptTop.y}) must not go above ceiling limit (${tCeilLimitY})`);
             console.assert(ptTop.y <= tFloorLimitY, `Assertion Failed: topPoint Y (${ptTop.y}) must not go below floor limit (${tFloorLimitY})`);
             console.assert(ptBottom.y >= tCeilLimitY, `Assertion Failed: bottomPoint Y (${ptBottom.y}) must not go above ceiling limit (${tCeilLimitY})`);
             console.assert(ptBottom.y <= tFloorLimitY, `Assertion Failed: bottomPoint Y (${ptBottom.y}) must not go below floor limit (${tFloorLimitY})`);
         }
+
+        // Test 13: Touch / Keyboard Dual Breathing Input
+        let testSpaceDownState = this.isBreathingIn();
+        console.assert(typeof testSpaceDownState === 'boolean', "Assertion Failed: isBreathingIn must return a boolean state");
 
         console.log("=== DIAGNOSTICS PASSED: ALL CONTROLS FUNCTIONAL ===");
     }
@@ -4467,6 +4005,10 @@ function startGame() {
         width: 1200,
         height: 700,
         backgroundColor: '#010410',
+        scale: {
+            mode: Phaser.Scale.FIT,
+            autoCenter: Phaser.Scale.CENTER_BOTH
+        },
         audio: {
             noAudio: true
         },

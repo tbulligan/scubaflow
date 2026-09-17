@@ -10,7 +10,7 @@ Repo prototype for **ScubaFlow**: flowing, breath-controlled, zero-HUD neon buoy
 ## 1. Source of Truth
 
 Repository code absolute source of truth:
-- `index.html`: Clean, static page with local track upload + Open Graph metadata.
+- `index.html`: Clean, static page with local track upload & drag-and-drop, responsive mobile viewport, + Open Graph metadata.
 - `game.js`: Core Phaser game logic + Web Audio procedural cave generation.
 - `favicon.svg`: Glowing neon vector bubble icon.
 - `scubaflow_og_image.png`: Graphic for social link preview.
@@ -36,9 +36,10 @@ For ScubaFlow:
 
 ### Breath Physics & State Machine
 - Vertical motion via buoyancy + drag physics:
-  - **buoyancy**: Controlled by lung volume $V_{lung} \in [0, 1]$, increase spacebar down (inhale), decrease on release (exhale).
+  - **buoyancy**: Controlled by lung volume $V_{lung} \in [0, 1]$, increase on spacebar or touch screen hold (`isBreathingIn()`), decrease on release (exhale).
   - **drag**: High vertical hydrodynamic drag dampens velocity.
   - **buoyancy tuning**: Buoyancy responsiveness `4.8`, vertical accel $a_y = 640$.
+  - **mobile input & canvas scale**: Phaser `Scale.FIT` layout with `touch-action: none` prevents gesture collision on tap & hold.
 
 ### Start Countdown Timer
 - Display start-of-dive overlay (`showTrackStartOverlay()`) for 2.0s, then numeric countdown (four 600ms ticks: "3", "2", "1", "FLOW!").
