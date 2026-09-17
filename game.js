@@ -280,11 +280,22 @@ class ScubaFlowScene extends Phaser.Scene {
 
             // Zero-HUD Hotkeys: Fullscreen (F), Pause (Esc/P), Resume (R), Exit (X)
             window.addEventListener('keydown', (e) => {
-                if (!this.isPlaying && !this.isPaused) return;
+                if (!this.isPlaying && !this.isPaused && !this.isLevelCompleted) return;
 
                 if (e.key === 'f' || e.key === 'F') {
                     e.preventDefault();
                     if (window.toggleFullscreen) window.toggleFullscreen();
+                    return;
+                }
+
+                if (this.isLevelCompleted) {
+                    if (e.key === 'r' || e.key === 'R') {
+                        e.preventDefault();
+                        this.restartDive();
+                    } else if (e.key === 'x' || e.key === 'X') {
+                        e.preventDefault();
+                        this.exitToTrackSelect();
+                    }
                     return;
                 }
 
@@ -391,7 +402,7 @@ class ScubaFlowScene extends Phaser.Scene {
 
             // SOTA Loader: Full-screen overlay with a pulsing sonar ring
             let statusBg = this.add.graphics();
-            statusBg.fillStyle(0x020514, 0.95);
+            statusBg.fillStyle(0x000206, 1.0);
             statusBg.fillRect(0, 0, 1200, 700);
 
             let sonarRing = this.add.graphics();
@@ -518,6 +529,7 @@ class ScubaFlowScene extends Phaser.Scene {
                                 try {
                                      renderer.pipelines.addPostPipeline('PsychedelicFX', PsychedelicFX);
                                      this.cameras.main.setPostPipeline(PsychedelicFX);
+                                     this.cameras.main.setBackgroundColor(initBgColor);
                                      console.log("PsychedelicFX WebGL Pipeline registered and attached.");
                                 } catch (e) {
                                      console.warn("Failed to register WebGL PostFX pipeline:", e);
@@ -3463,6 +3475,7 @@ class ScubaFlowScene extends Phaser.Scene {
         let parent = document.getElementById('game-container');
         let card = document.createElement('div');
         card.id = 'complete-screen';
+        card.className = 'results-card';
         card.style.position = 'absolute';
         card.style.top = '0';
         card.style.left = '0';
@@ -3523,23 +3536,35 @@ class ScubaFlowScene extends Phaser.Scene {
             ${careerHTML}
             <div style="display: flex; flex-direction: column; gap: 10px; margin-top: 15px;">
                 <button id="btn-restart" class="btn-dive" style="box-shadow: 0 0 25px rgba(189, 0, 255, 0.4);">DIVE AGAIN (R)</button>
-                <button id="btn-results-exit" class="btn-secondary">SELECT NEW TRACK</button>
+                <button id="btn-results-exit" class="btn-secondary">SELECT NEW TRACK (X)</button>
             </div>
         `;
         card.appendChild(innerCard);
         parent.appendChild(card);
 
+        const bindFastTap = (btn, action) => {
+            if (!btn) return;
+            let lastTrigger = 0;
+            const handler = (e) => {
+                e.stopPropagation();
+                if (e.cancelable) e.preventDefault();
+                let now = Date.now();
+                if (now - lastTrigger < 350) return;
+                lastTrigger = now;
+                action();
+            };
+            btn.addEventListener('pointerdown', handler);
+            btn.addEventListener('touchstart', handler, { passive: false });
+            btn.addEventListener('click', handler);
+        };
+
         let restartBtn = document.getElementById('btn-restart');
         if (restartBtn) {
-            restartBtn.addEventListener('click', () => {
-                this.restartDive();
-            });
+            bindFastTap(restartBtn, () => this.restartDive());
         }
         let exitBtn = document.getElementById('btn-results-exit');
         if (exitBtn) {
-            exitBtn.addEventListener('click', () => {
-                this.exitToTrackSelect();
-            });
+            bindFastTap(exitBtn, () => this.exitToTrackSelect());
         }
     }
 
@@ -3628,7 +3653,7 @@ class ScubaFlowScene extends Phaser.Scene {
         }
 
         // Remove results card if present
-        let card = document.getElementById('results-card');
+        let card = document.getElementById('complete-screen') || document.getElementById('results-card');
         if (card) card.remove();
 
         // Reset player & buddy coordinates
@@ -3650,6 +3675,7 @@ class ScubaFlowScene extends Phaser.Scene {
         this.siltLevel = 0;
         this.auraRings = 0;
         this.elapsedTime = 0;
+        this.baseHue = 0;
         this.musicCompleted = false;
         this.isFadingOut = false;
         this.isLevelCompleted = false;
@@ -3662,6 +3688,7 @@ class ScubaFlowScene extends Phaser.Scene {
         }
 
         // Reset camera and master gain
+        this.cameras.main.resetFX();
         this.cameras.main.scrollX = 0;
         this.cameras.main.setAlpha(1);
         let resetBgHue = (this.baseHue * 0.25) % 360;
@@ -3708,7 +3735,7 @@ class ScubaFlowScene extends Phaser.Scene {
         // Clean up DOM overlays
         let pauseScreen = document.getElementById('pause-screen');
         if (pauseScreen) pauseScreen.style.display = 'none';
-        let card = document.getElementById('results-card');
+        let card = document.getElementById('complete-screen') || document.getElementById('results-card');
         if (card) card.remove();
         let pauseBtn = document.getElementById('btn-pause');
         if (pauseBtn) {
@@ -4355,7 +4382,7 @@ function startGame() {
         parent: 'game-container',
         width: 1200,
         height: 700,
-        backgroundColor: '#010410',
+        backgroundColor: '#000206',
         scale: {
             mode: Phaser.Scale.FIT,
             autoCenter: Phaser.Scale.NO_CENTER

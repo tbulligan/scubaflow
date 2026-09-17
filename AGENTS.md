@@ -77,12 +77,10 @@ For ScubaFlow:
 - **Pause & Resume Lifecycle:**
   - `togglePause()` / `pauseDive()` suspends Web Audio clock (`audioContext.suspend()`), pauses update loop, renders glass pause modal displaying current score, multiplier, and elapsed time.
   - `resumeDive()` resumes Web Audio (`audioContext.resume()`) and hides modal (`Esc` / `P` keys).
-  - `restartDive()` restarts dive from beginning (`R` key).
-  - `exitToTrackSelect()` exits to track selection menu (`X` key).
-- **Quick Restart Lifecycle (`restartDive()` / `R` key during dive):**
-  - Instant in-place restart without browser page reload. Stops active buffer sources, kills tweens, clears results card, resets player/buddy/collectibles/scores, and restarts countdown sequence with cached audio buffer.
-- **Exit to Track Selection (`exitToTrackSelect()`):**
-  - Stops audio, tears down active Phaser game instance, and returns user seamlessly to `#intro-screen` with file uploader ready for a new track.
+  - `restartDive()` restarts dive from beginning (`R` key in-game, in pause, or on results screen). Clears lingering camera `fadeOut` effects with `resetFX()`, removes results card (`#complete-screen` / `.results-card`), and deterministically resets `this.baseHue = 0`.
+  - `exitToTrackSelect()` exits to track selection menu (`X` key in pause or on results screen). Removes results card, destroys Phaser instance, and unhides uploader overlay.
+- **Results Card Controls:**
+  - Displays "DIVE AGAIN (R)" and "SELECT NEW TRACK (X)" wired with `bindFastTap` for instant mobile taps and keyboard hotkeys (`R`/`X`).
 - **Start Countdown Avatar Clarity:**
   - During countdown ("3, 2, 1"), player displays "YOU 🫧" and buddy displays "FOLLOW ME 👌" diegetic speech bubbles. Both hide automatically when "FLOW!" triggers.
 - **Mobile SOTA Auto-Fullscreen & Orientation Guard:**
@@ -91,7 +89,7 @@ For ScubaFlow:
 - **Seamless Desktop Borderless Viewport:**
   - `#game-container` fills 100% width and height without fixed 1200x700 box borders or glowing boxes in fullscreen / F11 mode.
 - **Unified Countdown & Dive Background Luminance:**
-  - `this.cameras.main.setBackgroundColor` initializes and synchronizes baseline luminance (`lightnessBoost = 0.012`) during start countdown and active gameplay, eliminating any brightness jumps when gameplay starts.
+  - Base colors unified to pure void `#000206` across HTML `.ambient-glow`, `#game-container`, Phaser game config, decoder overlay, and `this.cameras.main.setBackgroundColor` (`lightnessBoost = 0.012`), eliminating blue tint bleed and brightness shifts.
 
 ### Zero-HUD Diegetic Signals & Balance Mechanics
 Feedback physical + auditory:
