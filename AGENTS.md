@@ -130,7 +130,8 @@ Multiplier $\ge \times 10$:
 - **Living Underwater Micro-Refraction**: WebGL `PsychedelicFX` shader applies subtle organic liquid wave distortion to screen UVs (`uTime`).
 - **Dynamic Bioluminescent Caustics**: Voronoi-approx underwater light mesh (`uCausticIntensity`) shimmers across cave walls, dynamically scaling with audio beats and flow state.
 - **Deep-Sea Vignette**: Smooth radial contrast falloff towards abyss corners.
-- **Radiant Diamond Shard Debris**: Collectibles rendered as glowing multi-stop diamond crystals with rotating core and outer neon aura.
+- **Radiant Diamond Shard Debris & Glint Sparks**: Collectibles rendered as glowing multi-stop diamond crystals with rotating core and outer neon aura. Debris explosions release 4-point diamond glint stars.
+- **Translucent Scuba Bubbles & Specular Sheen**: Dedicated procedural bubble texture featuring spherical glass membrane, internal refraction, and dual specular light highlights for breathing exhales and ambient floating bubbles.
 - **Luminous Lamp Lens Halos**: Player and buddy dive lamps emit radiant halogen bulb glows at beam origins.
 
 ### Uncapped Deterministic Simulation

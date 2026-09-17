@@ -1240,15 +1240,64 @@ class ScubaFlowScene extends Phaser.Scene {
             starCanvas.width = 16;
             starCanvas.height = 16;
             let sCtx = starCanvas.getContext('2d');
-            let grad = sCtx.createRadialGradient(8, 8, 1, 8, 8, 8);
+            
+            // Soft radial glow core
+            let grad = sCtx.createRadialGradient(8, 8, 0.5, 8, 8, 8);
             grad.addColorStop(0, 'rgba(255, 255, 255, 1)');
-            grad.addColorStop(0.3, 'rgba(255, 255, 255, 0.4)');
+            grad.addColorStop(0.35, 'rgba(255, 255, 255, 0.45)');
             grad.addColorStop(1, 'rgba(255, 255, 255, 0)');
             sCtx.fillStyle = grad;
+            sCtx.fillRect(0, 0, 16, 16);
+
+            // 4-point light glint needle
+            sCtx.fillStyle = 'rgba(255, 255, 255, 0.95)';
             sCtx.beginPath();
-            sCtx.arc(8, 8, 8, 0, Math.PI * 2);
+            sCtx.moveTo(8, 0);
+            sCtx.quadraticCurveTo(8, 8, 16, 8);
+            sCtx.quadraticCurveTo(8, 8, 8, 16);
+            sCtx.quadraticCurveTo(8, 8, 0, 8);
+            sCtx.quadraticCurveTo(8, 8, 8, 0);
             sCtx.fill();
+
             this.textures.addCanvas('spark', starCanvas);
+        }
+
+        if (!this.textures.exists('scuba_bubble')) {
+            let bCanvas = document.createElement('canvas');
+            bCanvas.width = 24;
+            bCanvas.height = 24;
+            let bCtx = bCanvas.getContext('2d');
+            
+            // Soft inner refraction glow
+            let bGrad = bCtx.createRadialGradient(12, 12, 2, 12, 12, 10);
+            bGrad.addColorStop(0, 'rgba(255, 255, 255, 0.05)');
+            bGrad.addColorStop(0.7, 'rgba(255, 255, 255, 0.2)');
+            bGrad.addColorStop(1, 'rgba(255, 255, 255, 0.65)');
+            bCtx.fillStyle = bGrad;
+            bCtx.beginPath();
+            bCtx.arc(12, 12, 10, 0, Math.PI * 2);
+            bCtx.fill();
+
+            // Outer bubble membrane sheen
+            bCtx.strokeStyle = 'rgba(255, 255, 255, 0.85)';
+            bCtx.lineWidth = 1.4;
+            bCtx.beginPath();
+            bCtx.arc(12, 12, 9.5, 0, Math.PI * 2);
+            bCtx.stroke();
+
+            // Primary specular shine highlight on top-left
+            bCtx.fillStyle = 'rgba(255, 255, 255, 0.95)';
+            bCtx.beginPath();
+            bCtx.arc(9, 8, 2.0, 0, Math.PI * 2);
+            bCtx.fill();
+
+            // Secondary subtle bounce reflection on bottom-right
+            bCtx.fillStyle = 'rgba(255, 255, 255, 0.45)';
+            bCtx.beginPath();
+            bCtx.arc(14.5, 14.5, 1.2, 0, Math.PI * 2);
+            bCtx.fill();
+
+            this.textures.addCanvas('scuba_bubble', bCanvas);
         }
 
         if (!this.textures.exists('collectible')) {
@@ -1326,12 +1375,12 @@ class ScubaFlowScene extends Phaser.Scene {
     }
 
     setupEmitters() {
-        this.bubbleEmitter = this.add.particles(0, 0, 'spark', {
+        this.bubbleEmitter = this.add.particles(0, 0, 'scuba_bubble', {
             lifespan: 1800,
             speedY: { min: -120, max: -40 },
             speedX: { min: -15, max: 20 },
-            scale: { start: 0.4, end: 1.2 },
-            alpha: { start: 0.6, end: 0 },
+            scale: { start: 0.35, end: 1.1 },
+            alpha: { start: 0.85, end: 0 },
             frequency: -1,
             blendMode: 'ADD'
         });
@@ -1816,6 +1865,8 @@ class ScubaFlowScene extends Phaser.Scene {
             fg.fillCircle(b.x, b.y, b.radius);
             fg.lineStyle(0.8, 0xffffff, b.alpha * 1.2);
             fg.strokeCircle(b.x, b.y, b.radius);
+            fg.fillStyle(0xffffff, b.alpha * 1.6);
+            fg.fillCircle(b.x - b.radius * 0.35, b.y - b.radius * 0.35, Math.max(0.8, b.radius * 0.22));
         }
 
         // 2. Draw foreground bubbles (larger, faster parallax)
@@ -1843,6 +1894,8 @@ class ScubaFlowScene extends Phaser.Scene {
             fg.fillCircle(b.x, b.y, b.radius);
             fg.lineStyle(1.0, 0xffffff, b.alpha * 1.5);
             fg.strokeCircle(b.x, b.y, b.radius);
+            fg.fillStyle(0xffffff, b.alpha * 1.8);
+            fg.fillCircle(b.x - b.radius * 0.35, b.y - b.radius * 0.35, Math.max(1.2, b.radius * 0.22));
         }
     }
 
@@ -2228,10 +2281,12 @@ class ScubaFlowScene extends Phaser.Scene {
         g.fillPath();
 
         // Draw luminous lamp bulb lens glow
-        g.fillStyle(0xffffff, 0.45 * intensity);
-        g.fillCircle(x0, y0, 3.5);
-        g.fillStyle(lightCol, 0.22 * intensity);
-        g.fillCircle(x0, y0, 9.0);
+        if (typeof g.fillCircle === 'function') {
+            g.fillStyle(0xffffff, 0.45 * intensity);
+            g.fillCircle(x0, y0, 3.5);
+            g.fillStyle(lightCol, 0.22 * intensity);
+            g.fillCircle(x0, y0, 9.0);
+        }
 
         return { x0: x0, dir: dir, topPoints: topPoints, bottomPoints: bottomPoints };
     }
@@ -4482,7 +4537,8 @@ class ScubaFlowScene extends Phaser.Scene {
         let mockG = {
             clear: () => {}, lineStyle: () => {}, fillStyle: () => {},
             beginPath: () => {}, moveTo: () => {}, lineTo: () => {},
-            closePath: () => {}, fillPath: () => {}, strokePath: () => {}
+            closePath: () => {}, fillPath: () => {}, strokePath: () => {},
+            fillCircle: () => {}
         };
         let testLight = this.drawDiveLight(mockG, 100, 250, 1, 0xffffff, 0xff00ff, 0.5);
         console.assert(testLight !== undefined && testLight.topPoints.length > 0, "Assertion Failed: drawDiveLight must return topPoints");
