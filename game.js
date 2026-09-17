@@ -172,6 +172,7 @@ class ScubaFlowScene extends Phaser.Scene {
         this.diverLimbs = {
             ke: 0, ke2: 0, foot1X: 0, foot1Y: 0, foot2X: 0, foot2Y: 0
         };
+        this.screenTouchActive = false;
     }
 
     preload() {
@@ -209,7 +210,53 @@ class ScubaFlowScene extends Phaser.Scene {
         this.createProceduralTextures();
 
         // 4. Setup Input
-        this.spaceKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
+        this.spaceKey = this.input && this.input.keyboard ? this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE) : null;
+
+        if (this.input) {
+            this.input.on('pointerdown', () => { this.screenTouchActive = true; });
+            this.input.on('pointerup', () => { this.screenTouchActive = false; });
+        }
+
+        if (typeof window !== 'undefined') {
+            window.addEventListener('pointerdown', (e) => {
+                if (this.isPlaying && !this.useAutopilot) {
+                    this.screenTouchActive = true;
+                }
+            }, { passive: false });
+
+            window.addEventListener('pointerup', () => {
+                this.screenTouchActive = false;
+            });
+
+            window.addEventListener('pointercancel', () => {
+                this.screenTouchActive = false;
+            });
+
+            window.addEventListener('touchstart', (e) => {
+                if (this.isPlaying && !this.useAutopilot) {
+                    if (e.cancelable) e.preventDefault();
+                    this.screenTouchActive = true;
+                }
+            }, { passive: false });
+
+            window.addEventListener('touchmove', (e) => {
+                if (this.isPlaying && !this.useAutopilot) {
+                    if (e.cancelable) e.preventDefault();
+                }
+            }, { passive: false });
+
+            window.addEventListener('touchend', () => {
+                this.screenTouchActive = false;
+            });
+
+            window.addEventListener('touchcancel', () => {
+                this.screenTouchActive = false;
+            });
+
+            window.addEventListener('contextmenu', (e) => {
+                if (this.isPlaying) e.preventDefault();
+            });
+        }
 
         // 5. Setup Visual Emitters
         this.setupEmitters();
@@ -538,7 +585,7 @@ class ScubaFlowScene extends Phaser.Scene {
                 fontFamily: 'Outfit',
                 fontSize: '140px',
                 fontStyle: 'bold'
-            }).setOrigin(0.5).setDepth(100);
+            }).setOrigin(0.5).setDepth(100).setScrollFactor(0);
 
             this.cameras.main.ignore(this.countdownText);
 
@@ -2823,7 +2870,10 @@ class ScubaFlowScene extends Phaser.Scene {
             return this.simulatedSpaceDown;
         }
         const keyboardDown = Boolean(this.spaceKey && this.spaceKey.isDown);
-        const pointerDown = Boolean(this.input && this.input.activePointer && this.input.activePointer.isDown);
+        const pointerDown = Boolean(
+            this.screenTouchActive ||
+            (this.input && this.input.activePointer && this.input.activePointer.isDown)
+        );
         return keyboardDown || pointerDown;
     }
 
@@ -3146,14 +3196,14 @@ class ScubaFlowScene extends Phaser.Scene {
             fontStyle: 'bold',
             color: colorStr,
             align: 'center'
-        }).setOrigin(0.5).setDepth(100).setAlpha(0);
+        }).setOrigin(0.5).setDepth(100).setAlpha(0).setScrollFactor(0);
 
         let durationText = this.add.text(600, 310, `DURATION: ${durationStr}`, {
             fontFamily: 'Outfit',
             fontSize: '20px',
             color: '#cbd5e1',
             align: 'center'
-        }).setOrigin(0.5).setDepth(100).setAlpha(0);
+        }).setOrigin(0.5).setDepth(100).setAlpha(0).setScrollFactor(0);
 
         this.cameras.main.ignore([infoText, durationText]);
 
