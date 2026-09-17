@@ -173,6 +173,7 @@ class ScubaFlowScene extends Phaser.Scene {
             ke: 0, ke2: 0, foot1X: 0, foot1Y: 0, foot2X: 0, foot2Y: 0
         };
         this.screenTouchActive = false;
+        this.isPaused = false;
     }
 
     preload() {
@@ -256,7 +257,24 @@ class ScubaFlowScene extends Phaser.Scene {
             window.addEventListener('contextmenu', (e) => {
                 if (this.isPlaying) e.preventDefault();
             });
+
+            // Zero-HUD Hotkeys: Fullscreen (F), Pause (Esc/P), Quick Restart (R)
+            window.addEventListener('keydown', (e) => {
+                if (!this.isPlaying && !this.isPaused) return;
+                if (e.key === 'f' || e.key === 'F') {
+                    e.preventDefault();
+                    if (window.toggleFullscreen) window.toggleFullscreen();
+                } else if (e.key === 'p' || e.key === 'P' || e.key === 'Escape') {
+                    e.preventDefault();
+                    this.togglePause();
+                } else if (e.key === 'r' || e.key === 'R') {
+                    e.preventDefault();
+                    this.restartDive();
+                }
+            });
         }
+
+        window.activeScubaScene = this;
 
         // 5. Setup Visual Emitters
         this.setupEmitters();
@@ -595,7 +613,7 @@ class ScubaFlowScene extends Phaser.Scene {
 
     update(time, delta) {
         try {
-            if (!this.isPlaying) return;
+            if (!this.isPlaying || this.isPaused) return;
 
             if (this.countdownActive) {
                 this.elapsedTime = 0;
@@ -3205,6 +3223,8 @@ class ScubaFlowScene extends Phaser.Scene {
             align: 'center'
         }).setOrigin(0.5).setDepth(100).setAlpha(0).setScrollFactor(0);
 
+        this.startInfoText = infoText;
+        this.startDurationText = durationText;
         this.cameras.main.ignore([infoText, durationText]);
 
         this.tweens.add({
@@ -3219,8 +3239,14 @@ class ScubaFlowScene extends Phaser.Scene {
                         alpha: 0,
                         duration: 500,
                         onComplete: () => {
-                            infoText.destroy();
-                            durationText.destroy();
+                            if (this.startInfoText) {
+                                this.startInfoText.destroy();
+                                this.startInfoText = null;
+                            }
+                            if (this.startDurationText) {
+                                this.startDurationText.destroy();
+                                this.startDurationText = null;
+                            }
                             if (onCompleteCallback) {
                                 onCompleteCallback();
                             }
@@ -3430,14 +3456,210 @@ class ScubaFlowScene extends Phaser.Scene {
             </div>
             ${highScoreHTML}
             ${careerHTML}
-            <button id="btn-restart" class="btn-dive" style="box-shadow: 0 0 25px rgba(189, 0, 255, 0.4); margin-top: 10px;">DIVE AGAIN</button>
+            <div style="display: flex; flex-direction: column; gap: 10px; margin-top: 15px;">
+                <button id="btn-restart" class="btn-dive" style="box-shadow: 0 0 25px rgba(189, 0, 255, 0.4);">DIVE AGAIN (R)</button>
+                <button id="btn-results-exit" class="btn-secondary">SELECT NEW TRACK</button>
+            </div>
         `;
         card.appendChild(innerCard);
         parent.appendChild(card);
 
-        document.getElementById('btn-restart').addEventListener('click', () => {
-            location.reload();
-        });
+        let restartBtn = document.getElementById('btn-restart');
+        if (restartBtn) {
+            restartBtn.addEventListener('click', () => {
+                this.restartDive();
+            });
+        }
+        let exitBtn = document.getElementById('btn-results-exit');
+        if (exitBtn) {
+            exitBtn.addEventListener('click', () => {
+                this.exitToTrackSelect();
+            });
+        }
+    }
+
+    // --- ZERO-HUD GAME CONTROLS & LIFECYCLE ---
+
+    togglePause() {
+        if (!this.isPlaying || this.isLevelCompleted || this.isFadingOut) return;
+        if (this.isPaused) {
+            this.resumeDive();
+        } else {
+            this.pauseDive();
+        }
+    }
+
+    pauseDive() {
+        if (!this.isPlaying || this.isPaused) return;
+        this.isPaused = true;
+        if (this.audioContext && this.audioContext.state === 'running') {
+            this.audioContext.suspend();
+        }
+        let pauseScreen = document.getElementById('pause-screen');
+        if (pauseScreen) {
+            let statsEl = document.getElementById('pause-stats');
+            if (statsEl) {
+                let mins = Math.floor(this.elapsedTime / 60000);
+                let secs = Math.floor((this.elapsedTime % 60000) / 1000).toString().padStart(2, '0');
+                statsEl.textContent = `Score: ${this.score.toLocaleString()} | Multiplier: x${this.multiplier} | Time: ${mins}:${secs}`;
+            }
+            pauseScreen.style.display = 'flex';
+        }
+        let pauseBtn = document.getElementById('btn-pause');
+        if (pauseBtn) pauseBtn.classList.add('active');
+    }
+
+    resumeDive() {
+        if (!this.isPaused) return;
+        this.isPaused = false;
+        if (this.audioContext && this.audioContext.state === 'suspended') {
+            this.audioContext.resume();
+        }
+        let pauseScreen = document.getElementById('pause-screen');
+        if (pauseScreen) {
+            pauseScreen.style.display = 'none';
+        }
+        let pauseBtn = document.getElementById('btn-pause');
+        if (pauseBtn) pauseBtn.classList.remove('active');
+    }
+
+    restartDive() {
+        this.resumeDive();
+
+        // Kill active tweens
+        this.tweens.killAll();
+
+        // Clean up text overlays if active
+        if (this.countdownText) {
+            try { this.countdownText.destroy(); } catch(e) {}
+            this.countdownText = null;
+        }
+        if (this.startInfoText) {
+            try { this.startInfoText.destroy(); } catch(e) {}
+            this.startInfoText = null;
+        }
+        if (this.startDurationText) {
+            try { this.startDurationText.destroy(); } catch(e) {}
+            this.startDurationText = null;
+        }
+
+        // Stop audio nodes
+        if (this.musicSource) {
+            try {
+                this.musicSource.onended = null;
+                this.musicSource.stop();
+                this.musicSource.disconnect();
+            } catch(e) {}
+            this.musicSource = null;
+        }
+        if (this.inhaleSource) {
+            try {
+                this.inhaleSource.stop();
+                this.inhaleSource.disconnect();
+            } catch(e) {}
+            this.inhaleSource = null;
+        }
+
+        // Remove results card if present
+        let card = document.getElementById('results-card');
+        if (card) card.remove();
+
+        // Reset player & buddy coordinates
+        let playerStartY = this.getTargetYAtTime((250 / this.baseScrollSpeed) * 1000);
+        let buddyStartY = this.getTargetYAtTime((550 / this.baseScrollSpeed) * 1000);
+        this.player.x = 250;
+        this.player.y = playerStartY;
+        this.player.vy = 0;
+        this.lungVolume = 0.5;
+        this.buddy.x = 550;
+        this.buddy.y = buddyStartY;
+        this.buddy.vy = 0;
+
+        // Reset scores and modifiers
+        this.score = 0;
+        this.pointsScore = 0;
+        this.multiplier = 1;
+        this.comboStreak = 0;
+        this.siltLevel = 0;
+        this.auraRings = 0;
+        this.elapsedTime = 0;
+        this.musicCompleted = false;
+        this.isFadingOut = false;
+        this.isLevelCompleted = false;
+        this.lastProcessedBeatIdx = -1;
+        this.beatRipples = [];
+
+        // Reset collectibles
+        if (this.levelData && this.levelData.collectibles) {
+            this.levelData.collectibles.forEach(c => { c.collected = false; });
+        }
+
+        // Reset camera and master gain
+        this.cameras.main.scrollX = 0;
+        this.cameras.main.setAlpha(1);
+        if (this.masterGain && this.audioContext) {
+            this.masterGain.gain.cancelScheduledValues(this.audioContext.currentTime);
+            this.masterGain.gain.setValueAtTime(0.95, this.audioContext.currentTime);
+        }
+
+        // Restart countdown sequence
+        if (this.audioContext) {
+            this.startCountdown(this.audioContext);
+        }
+    }
+
+    exitToTrackSelect() {
+        this.isPlaying = false;
+        this.isPaused = false;
+        this.tweens.killAll();
+
+        // Stop audio nodes
+        if (this.musicSource) {
+            try {
+                this.musicSource.onended = null;
+                this.musicSource.stop();
+                this.musicSource.disconnect();
+            } catch(e) {}
+            this.musicSource = null;
+        }
+        if (this.inhaleSource) {
+            try {
+                this.inhaleSource.stop();
+                this.inhaleSource.disconnect();
+            } catch(e) {}
+            this.inhaleSource = null;
+        }
+        if (this.audioContext && this.audioContext.state === 'suspended') {
+            this.audioContext.resume();
+        }
+
+        // Clean up DOM overlays
+        let pauseScreen = document.getElementById('pause-screen');
+        if (pauseScreen) pauseScreen.style.display = 'none';
+        let card = document.getElementById('results-card');
+        if (card) card.remove();
+        let pauseBtn = document.getElementById('btn-pause');
+        if (pauseBtn) {
+            pauseBtn.style.display = 'none';
+            pauseBtn.classList.remove('active');
+        }
+
+        // Destroy Phaser game instance
+        if (window.game) {
+            window.game.destroy(true);
+            window.game = null;
+        }
+
+        // Show intro screen with uploader
+        let introScreen = document.getElementById('intro-screen');
+        if (introScreen) {
+            introScreen.classList.remove('descending');
+            introScreen.style.display = 'flex';
+            introScreen.style.opacity = '1';
+            introScreen.style.pointerEvents = 'auto';
+            introScreen.style.transform = 'scale(1)';
+            introScreen.style.filter = 'none';
+        }
     }
 
     // --- PROCEDURAL LEVEL GENERATION ---

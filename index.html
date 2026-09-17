@@ -258,6 +258,137 @@
             transform: scale(0.98);
         }
 
+        .btn-secondary {
+            background: rgba(8, 14, 38, 0.7);
+            border: 1px solid rgba(0, 240, 255, 0.3);
+            color: #e2e8f0;
+            padding: 10px 24px;
+            font-size: 0.95rem;
+            font-family: 'Outfit', sans-serif;
+            font-weight: 500;
+            border-radius: 50px;
+            cursor: pointer;
+            box-shadow: 0 0 15px rgba(0, 240, 255, 0.15);
+            transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+            letter-spacing: 1.5px;
+            text-transform: uppercase;
+            outline: none;
+        }
+
+        .btn-secondary:hover {
+            border-color: var(--primary);
+            color: #fff;
+            box-shadow: 0 0 25px rgba(0, 240, 255, 0.35);
+            transform: scale(1.03);
+            background: rgba(0, 240, 255, 0.1);
+        }
+
+        .btn-secondary:active {
+            transform: scale(0.98);
+        }
+
+        /* Floating Zero-HUD Quick Controls Dock */
+        .quick-controls-dock {
+            position: absolute;
+            top: max(14px, env(safe-area-inset-top));
+            right: max(14px, env(safe-area-inset-right));
+            z-index: 50;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            opacity: 0.35;
+            transition: opacity 0.3s ease, transform 0.3s ease;
+            pointer-events: auto;
+        }
+
+        .quick-controls-dock:hover,
+        .quick-controls-dock:focus-within,
+        .quick-controls-dock.active {
+            opacity: 1;
+        }
+
+        .dock-btn {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: rgba(8, 14, 38, 0.75);
+            border: 1px solid rgba(0, 240, 255, 0.25);
+            color: #cbd5e1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.4), 0 0 10px rgba(0, 240, 255, 0.15);
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+            outline: none;
+            padding: 8px;
+        }
+
+        .dock-btn:hover {
+            border-color: var(--primary);
+            color: #00f0ff;
+            transform: scale(1.1);
+            box-shadow: 0 0 20px rgba(0, 240, 255, 0.4);
+            background: rgba(10, 24, 60, 0.85);
+        }
+
+        .dock-btn:active {
+            transform: scale(0.95);
+        }
+
+        .dock-btn.active {
+            border-color: var(--secondary);
+            color: #bd00ff;
+            box-shadow: 0 0 20px rgba(189, 0, 255, 0.5);
+        }
+
+        .dock-icon {
+            width: 20px;
+            height: 20px;
+            pointer-events: none;
+        }
+
+        /* Pause Overlay */
+        .pause-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(2, 5, 20, 0.82);
+            backdrop-filter: blur(14px);
+            -webkit-backdrop-filter: blur(14px);
+            z-index: 100;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            transition: opacity 0.25s ease;
+        }
+
+        .pause-card {
+            max-width: 440px;
+            width: 90%;
+            padding: 30px 24px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .pause-button-group {
+            display: flex;
+            flex-direction: column;
+            width: 100%;
+            gap: 12px;
+            margin-top: 10px;
+        }
+
+        .pause-button-group button {
+            width: 100%;
+        }
+
         /* Ambient floating bubbles in HTML background */
         .bubble-bg {
             position: absolute;
@@ -576,6 +707,34 @@
     <div class="bubble-bg" style="width: 26px; height: 26px; left: 88%; animation-duration: 13s; animation-delay: 3s;"></div>
 
     <div id="game-container">
+        <!-- Floating Zero-HUD Quick Controls Dock -->
+        <div id="quick-controls-dock" class="quick-controls-dock">
+            <button id="btn-fullscreen" class="dock-btn" type="button" title="Toggle Fullscreen (F)" aria-label="Toggle Fullscreen">
+                <svg viewBox="0 0 24 24" class="dock-icon" id="fullscreen-icon">
+                    <path fill="currentColor" d="M3 3h6v2H5v4H3V3zm12 0h6v6h-2V5h-4V3zM3 15h2v4h4v2H3v-6zm16 4h-4v2h6v-6h-2v4z"/>
+                </svg>
+            </button>
+            <button id="btn-pause" class="dock-btn" type="button" title="Pause Dive (Esc / P)" aria-label="Pause Dive" style="display: none;">
+                <svg viewBox="0 0 24 24" class="dock-icon">
+                    <path fill="currentColor" d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/>
+                </svg>
+            </button>
+        </div>
+
+        <!-- Pause Menu Overlay -->
+        <div id="pause-screen" class="pause-overlay" style="display: none;">
+            <div class="glass-card pause-card">
+                <h2 class="glow-title" style="font-size: 26px; margin-bottom: 6px; letter-spacing: 2px;">DIVE PAUSED</h2>
+                <div class="subtitle" id="pause-stats" style="margin-bottom: 24px; font-size: 13px; color: #94a3b8;">Score: 0 | Multiplier: x1</div>
+                
+                <div class="pause-button-group">
+                    <button id="btn-resume" class="btn-dive" type="button">Resume Dive</button>
+                    <button id="btn-pause-restart" class="btn-secondary" type="button">Restart Dive (R)</button>
+                    <button id="btn-pause-exit" class="btn-secondary" type="button">Exit to Track Select</button>
+                </div>
+            </div>
+        </div>
+
         <!-- Interactive Start Overlay -->
         <div id="intro-screen">
             <div class="glass-card">
@@ -700,6 +859,86 @@
         });
 
 
+        // Fullscreen Toggle Handler
+        window.toggleFullscreen = function() {
+            if (!document.fullscreenElement && !document.webkitFullscreenElement) {
+                let el = document.documentElement;
+                if (el.requestFullscreen) {
+                    el.requestFullscreen().catch(err => console.warn("Fullscreen error:", err));
+                } else if (el.webkitRequestFullscreen) {
+                    el.webkitRequestFullscreen();
+                }
+            } else {
+                if (document.exitFullscreen) {
+                    document.exitFullscreen().catch(err => console.warn("Exit fullscreen error:", err));
+                } else if (document.webkitExitFullscreen) {
+                    document.webkitExitFullscreen();
+                }
+            }
+        };
+
+        const updateFullscreenUI = () => {
+            const isFs = Boolean(document.fullscreenElement || document.webkitFullscreenElement);
+            const icon = document.getElementById('fullscreen-icon');
+            if (icon) {
+                if (isFs) {
+                    icon.innerHTML = '<path fill="currentColor" d="M5 16h3v3h2v-5H5v2zm3-8H5v2h5V5H8v3zm6 11h2v-3h3v-2h-5v5zm2-11V5h-2v5h5V8h-3z"/>';
+                } else {
+                    icon.innerHTML = '<path fill="currentColor" d="M3 3h6v2H5v4H3V3zm12 0h6v6h-2V5h-4V3zM3 15h2v4h4v2H3v-6zm16 4h-4v2h6v-6h-2v4z"/>';
+                }
+            }
+            if (window.game && window.game.scale) {
+                setTimeout(() => window.game.scale.refresh(), 100);
+            }
+        };
+
+        document.addEventListener('fullscreenchange', updateFullscreenUI);
+        document.addEventListener('webkitfullscreenchange', updateFullscreenUI);
+
+        const fsBtn = document.getElementById('btn-fullscreen');
+        if (fsBtn) {
+            if (!(document.fullscreenEnabled || document.webkitFullscreenEnabled)) {
+                fsBtn.style.display = 'none';
+            } else {
+                fsBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    window.toggleFullscreen();
+                });
+            }
+        }
+
+        // Pause Menu Wire-up
+        const pauseBtn = document.getElementById('btn-pause');
+        if (pauseBtn) {
+            pauseBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                if (window.activeScubaScene) {
+                    window.activeScubaScene.togglePause();
+                }
+            });
+        }
+
+        document.getElementById('btn-resume').addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (window.activeScubaScene) {
+                window.activeScubaScene.resumeDive();
+            }
+        });
+
+        document.getElementById('btn-pause-restart').addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (window.activeScubaScene) {
+                window.activeScubaScene.restartDive();
+            }
+        });
+
+        document.getElementById('btn-pause-exit').addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (window.activeScubaScene) {
+                window.activeScubaScene.exitToTrackSelect();
+            }
+        });
+
         // Wire-up page start overlay trigger
         document.getElementById('btn-dive').addEventListener('click', () => {
             // Create and resume AudioContext inside the user gesture stack to prevent decode hangs
@@ -717,6 +956,7 @@
             overlay.classList.add('descending');
             setTimeout(() => {
                 overlay.style.display = 'none';
+                if (pauseBtn) pauseBtn.style.display = 'flex';
                 startGame();
                 
                 // Focus the window and the game canvas to capture keyboard events immediately

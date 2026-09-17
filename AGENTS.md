@@ -68,6 +68,19 @@ For ScubaFlow:
 - Redundant `setTimeout` fallback in `startFadeout` with Phaser `time.delayedCall` render results card in DOM when window blurred.
 - Camera fade out `#020514`, master gain ramp down `0.0001`, gameplay systems active during transition.
 
+### Zero-HUD Game Controls & Lifecycle Management
+- **Translucent Quick Controls Dock:**
+  - Minimal top-right corner dock (`opacity: 0.35`, glows on hover/focus):
+    - `btn-fullscreen`: Toggles borderless HTML5 Fullscreen (`F` key). Feature-detects `fullscreenEnabled` to gracefully hide on unsupported platforms (e.g. iPhone Safari).
+    - `btn-pause`: Toggles pause overlay (`Esc` / `P` keys). Hidden on intro screen, visible during dive.
+- **Pause & Resume Lifecycle:**
+  - `togglePause()` / `pauseDive()` suspends Web Audio clock (`audioContext.suspend()`), pauses update loop, renders glass pause modal displaying current score, multiplier, and elapsed time.
+  - `resumeDive()` resumes Web Audio (`audioContext.resume()`) and hides modal.
+- **Quick Restart Lifecycle (`restartDive()` / `R` key):**
+  - Instant in-place restart without browser page reload. Stops active buffer sources, kills tweens, clears results card, resets player/buddy/collectibles/scores, and restarts countdown sequence with cached audio buffer.
+- **Exit to Track Selection (`exitToTrackSelect()`):**
+  - Stops audio, tears down active Phaser game instance, and returns user seamlessly to `#intro-screen` with file uploader ready for a new track.
+
 ### Zero-HUD Diegetic Signals & Balance Mechanics
 Feedback physical + auditory:
 - **Depth**: Ambient background HSL color shift + buddy depth.
