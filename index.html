@@ -292,13 +292,14 @@
             position: absolute;
             top: max(14px, env(safe-area-inset-top));
             right: max(14px, env(safe-area-inset-right));
-            z-index: 50;
+            z-index: 90;
             display: flex;
             align-items: center;
-            gap: 10px;
-            opacity: 0.35;
+            gap: 12px;
+            opacity: 0.45;
             transition: opacity 0.3s ease, transform 0.3s ease;
             pointer-events: auto;
+            touch-action: auto;
         }
 
         .quick-controls-dock:hover,
@@ -307,9 +308,17 @@
             opacity: 1;
         }
 
+        @media (hover: none) and (pointer: coarse) {
+            .quick-controls-dock {
+                opacity: 0.6;
+            }
+        }
+
         .dock-btn {
-            width: 40px;
-            height: 40px;
+            width: 44px;
+            height: 44px;
+            min-width: 44px;
+            min-height: 44px;
             border-radius: 50%;
             background: rgba(8, 14, 38, 0.75);
             border: 1px solid rgba(0, 240, 255, 0.25);
@@ -324,6 +333,10 @@
             transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
             outline: none;
             padding: 8px;
+            touch-action: manipulation;
+            -webkit-tap-highlight-color: transparent;
+            user-select: none;
+            -webkit-user-select: none;
         }
 
         .dock-btn:hover {
@@ -728,9 +741,9 @@
                 <div class="subtitle" id="pause-stats" style="margin-bottom: 24px; font-size: 13px; color: #94a3b8;">Score: 0 | Multiplier: x1</div>
                 
                 <div class="pause-button-group">
-                    <button id="btn-resume" class="btn-dive" type="button">Resume Dive</button>
-                    <button id="btn-pause-restart" class="btn-secondary" type="button">Restart Dive (R)</button>
-                    <button id="btn-pause-exit" class="btn-secondary" type="button">Exit to Track Select</button>
+                    <button id="btn-resume" class="btn-dive" type="button">Resume Dive (R)</button>
+                    <button id="btn-pause-restart" class="btn-secondary" type="button">Restart Dive</button>
+                    <button id="btn-pause-exit" class="btn-secondary" type="button">Exit to Track Select (X)</button>
                 </div>
             </div>
         </div>
@@ -895,45 +908,54 @@
         document.addEventListener('fullscreenchange', updateFullscreenUI);
         document.addEventListener('webkitfullscreenchange', updateFullscreenUI);
 
+        const bindFastTap = (btn, action) => {
+            if (!btn) return;
+            let lastTrigger = 0;
+            const handler = (e) => {
+                e.stopPropagation();
+                if (e.cancelable) e.preventDefault();
+                let now = Date.now();
+                if (now - lastTrigger < 350) return;
+                lastTrigger = now;
+                action();
+            };
+            btn.addEventListener('pointerdown', handler);
+            btn.addEventListener('touchstart', handler, { passive: false });
+            btn.addEventListener('click', handler);
+        };
+
         const fsBtn = document.getElementById('btn-fullscreen');
         if (fsBtn) {
             if (!(document.fullscreenEnabled || document.webkitFullscreenEnabled)) {
                 fsBtn.style.display = 'none';
             } else {
-                fsBtn.addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    window.toggleFullscreen();
-                });
+                bindFastTap(fsBtn, () => window.toggleFullscreen());
             }
         }
 
         // Pause Menu Wire-up
         const pauseBtn = document.getElementById('btn-pause');
         if (pauseBtn) {
-            pauseBtn.addEventListener('click', (e) => {
-                e.stopPropagation();
+            bindFastTap(pauseBtn, () => {
                 if (window.activeScubaScene) {
                     window.activeScubaScene.togglePause();
                 }
             });
         }
 
-        document.getElementById('btn-resume').addEventListener('click', (e) => {
-            e.stopPropagation();
+        bindFastTap(document.getElementById('btn-resume'), () => {
             if (window.activeScubaScene) {
                 window.activeScubaScene.resumeDive();
             }
         });
 
-        document.getElementById('btn-pause-restart').addEventListener('click', (e) => {
-            e.stopPropagation();
+        bindFastTap(document.getElementById('btn-pause-restart'), () => {
             if (window.activeScubaScene) {
                 window.activeScubaScene.restartDive();
             }
         });
 
-        document.getElementById('btn-pause-exit').addEventListener('click', (e) => {
-            e.stopPropagation();
+        bindFastTap(document.getElementById('btn-pause-exit'), () => {
             if (window.activeScubaScene) {
                 window.activeScubaScene.exitToTrackSelect();
             }

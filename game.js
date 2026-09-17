@@ -219,13 +219,30 @@ class ScubaFlowScene extends Phaser.Scene {
         }
 
         if (typeof window !== 'undefined') {
+            const isInteractiveUI = (target) => {
+                return Boolean(target && (
+                    (target.closest && (
+                        target.closest('#quick-controls-dock') ||
+                        target.closest('#pause-screen') ||
+                        target.closest('#intro-screen') ||
+                        target.closest('.glass-card') ||
+                        target.closest('.dock-btn')
+                    )) ||
+                    target.tagName === 'BUTTON' ||
+                    target.tagName === 'A' ||
+                    target.tagName === 'INPUT'
+                ));
+            };
+
             window.addEventListener('pointerdown', (e) => {
-                if (this.isPlaying && !this.useAutopilot) {
+                if (isInteractiveUI(e.target)) return;
+                if (this.isPlaying && !this.useAutopilot && !this.isPaused) {
                     this.screenTouchActive = true;
                 }
             }, { passive: false });
 
-            window.addEventListener('pointerup', () => {
+            window.addEventListener('pointerup', (e) => {
+                if (isInteractiveUI(e.target)) return;
                 this.screenTouchActive = false;
             });
 
@@ -234,19 +251,22 @@ class ScubaFlowScene extends Phaser.Scene {
             });
 
             window.addEventListener('touchstart', (e) => {
-                if (this.isPlaying && !this.useAutopilot) {
+                if (isInteractiveUI(e.target)) return;
+                if (this.isPlaying && !this.useAutopilot && !this.isPaused) {
                     if (e.cancelable) e.preventDefault();
                     this.screenTouchActive = true;
                 }
             }, { passive: false });
 
             window.addEventListener('touchmove', (e) => {
-                if (this.isPlaying && !this.useAutopilot) {
+                if (isInteractiveUI(e.target)) return;
+                if (this.isPlaying && !this.useAutopilot && !this.isPaused) {
                     if (e.cancelable) e.preventDefault();
                 }
             }, { passive: false });
 
-            window.addEventListener('touchend', () => {
+            window.addEventListener('touchend', (e) => {
+                if (isInteractiveUI(e.target)) return;
                 this.screenTouchActive = false;
             });
 
@@ -258,15 +278,31 @@ class ScubaFlowScene extends Phaser.Scene {
                 if (this.isPlaying) e.preventDefault();
             });
 
-            // Zero-HUD Hotkeys: Fullscreen (F), Pause (Esc/P), Quick Restart (R)
+            // Zero-HUD Hotkeys: Fullscreen (F), Pause (Esc/P), Resume (R), Exit (X)
             window.addEventListener('keydown', (e) => {
                 if (!this.isPlaying && !this.isPaused) return;
+
                 if (e.key === 'f' || e.key === 'F') {
                     e.preventDefault();
                     if (window.toggleFullscreen) window.toggleFullscreen();
-                } else if (e.key === 'p' || e.key === 'P' || e.key === 'Escape') {
+                    return;
+                }
+
+                if (this.isPaused) {
+                    if (e.key === 'r' || e.key === 'R' || e.key === 'p' || e.key === 'P' || e.key === 'Escape') {
+                        e.preventDefault();
+                        this.resumeDive();
+                    } else if (e.key === 'x' || e.key === 'X') {
+                        e.preventDefault();
+                        this.exitToTrackSelect();
+                    }
+                    return;
+                }
+
+                // While playing (unpaused)
+                if (e.key === 'p' || e.key === 'P' || e.key === 'Escape') {
                     e.preventDefault();
-                    this.togglePause();
+                    this.pauseDive();
                 } else if (e.key === 'r' || e.key === 'R') {
                     e.preventDefault();
                     this.restartDive();
@@ -538,6 +574,14 @@ class ScubaFlowScene extends Phaser.Scene {
         this.isPlaying = true; // allow update loop to render the starting scene
 
         this.showTrackStartOverlay(() => {
+            // Diegetic Avatar Clarity: Show "YOU" and "FOLLOW ME 👌" during countdown
+            if (this.buddyBubble) {
+                this.buddyBubble.setText("FOLLOW ME 👌").setVisible(true).setPosition(this.buddy.x, this.buddy.y - 45);
+            }
+            if (this.playerBubble) {
+                this.playerBubble.setText("YOU 🫧").setVisible(true).setPosition(this.player.x, this.player.y - 45);
+            }
+
             let countdownNumbers = ['3', '2', '1', 'FLOW!'];
             let colors = ['#bd00ff', '#00f0ff', '#ff007f', '#00ff66'];
             let index = 0;
@@ -593,6 +637,8 @@ class ScubaFlowScene extends Phaser.Scene {
                 } else {
                     this.countdownText.destroy();
                     this.countdownActive = false;
+                    if (this.buddyBubble) this.buddyBubble.setVisible(false);
+                    if (this.playerBubble) this.playerBubble.setVisible(false);
                     console.log("Countdown complete. Starting setupAudioEngine...");
                     this.setupAudioEngine(ctx);
                     console.log("setupAudioEngine completed.");
@@ -625,6 +671,13 @@ class ScubaFlowScene extends Phaser.Scene {
 
                 let playerStartY = this.getTargetYAtTime((250 / this.baseScrollSpeed) * 1000);
                 this.player.y = playerStartY;
+
+                if (this.buddyBubble && this.buddyBubble.visible) {
+                    this.buddyBubble.setPosition(this.buddy.x, this.buddy.y - 45);
+                }
+                if (this.playerBubble && this.playerBubble.visible) {
+                    this.playerBubble.setPosition(this.player.x, this.player.y - 45);
+                }
 
                 // Simulate normal breathing cycle for player visuals during countdown
                 let breathPeriod = 3600;
@@ -3542,6 +3595,8 @@ class ScubaFlowScene extends Phaser.Scene {
             try { this.startDurationText.destroy(); } catch(e) {}
             this.startDurationText = null;
         }
+        if (this.buddyBubble) this.buddyBubble.setVisible(false);
+        if (this.playerBubble) this.playerBubble.setVisible(false);
 
         // Stop audio nodes
         if (this.musicSource) {
@@ -3612,6 +3667,8 @@ class ScubaFlowScene extends Phaser.Scene {
         this.isPlaying = false;
         this.isPaused = false;
         this.tweens.killAll();
+        if (this.buddyBubble) this.buddyBubble.setVisible(false);
+        if (this.playerBubble) this.playerBubble.setVisible(false);
 
         // Stop audio nodes
         if (this.musicSource) {

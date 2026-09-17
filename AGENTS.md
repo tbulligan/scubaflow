@@ -70,16 +70,20 @@ For ScubaFlow:
 
 ### Zero-HUD Game Controls & Lifecycle Management
 - **Translucent Quick Controls Dock:**
-  - Minimal top-right corner dock (`opacity: 0.35`, glows on hover/focus):
+  - Minimal top-right corner dock (`opacity: 0.45` / `0.6` on touch, glows on hover/focus):
     - `btn-fullscreen`: Toggles borderless HTML5 Fullscreen (`F` key). Feature-detects `fullscreenEnabled` to gracefully hide on unsupported platforms (e.g. iPhone Safari).
     - `btn-pause`: Toggles pause overlay (`Esc` / `P` keys). Hidden on intro screen, visible during dive.
+  - **Mobile Touch Isolation (`isInteractiveUI` & `bindFastTap`):** Prevents window-wide touch breathing listeners (`preventDefault()`) from blocking dock and modal button taps. `bindFastTap` triggers instantly on touch without 300ms mobile delay.
 - **Pause & Resume Lifecycle:**
   - `togglePause()` / `pauseDive()` suspends Web Audio clock (`audioContext.suspend()`), pauses update loop, renders glass pause modal displaying current score, multiplier, and elapsed time.
-  - `resumeDive()` resumes Web Audio (`audioContext.resume()`) and hides modal.
-- **Quick Restart Lifecycle (`restartDive()` / `R` key):**
+  - `resumeDive()` resumes Web Audio (`audioContext.resume()`) and hides modal (`Esc` / `P` / `R` keys).
+  - `exitToTrackSelect()` exits to track selection menu (`X` key).
+- **Quick Restart Lifecycle (`restartDive()` / `R` key during dive):**
   - Instant in-place restart without browser page reload. Stops active buffer sources, kills tweens, clears results card, resets player/buddy/collectibles/scores, and restarts countdown sequence with cached audio buffer.
 - **Exit to Track Selection (`exitToTrackSelect()`):**
   - Stops audio, tears down active Phaser game instance, and returns user seamlessly to `#intro-screen` with file uploader ready for a new track.
+- **Start Countdown Avatar Clarity:**
+  - During countdown ("3, 2, 1"), player displays "YOU 🫧" and buddy displays "FOLLOW ME 👌" diegetic speech bubbles. Both hide automatically when "FLOW!" triggers.
 
 ### Zero-HUD Diegetic Signals & Balance Mechanics
 Feedback physical + auditory:
