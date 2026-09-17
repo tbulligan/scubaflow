@@ -126,6 +126,13 @@ Multiplier $\ge \times 10$:
 - **Visual Scaling Cap**: Super-Flow visual scaling capped at $\times 15$.
 - **Superflow Text Notifications**: Level 10+ spawn yellow text (`🫧 SUPERFLOW x{multiplier}! 🫧`).
 
+### Cinematic Visuals & PostFX Pipeline
+- **Living Underwater Micro-Refraction**: WebGL `PsychedelicFX` shader applies subtle organic liquid wave distortion to screen UVs (`uTime`).
+- **Dynamic Bioluminescent Caustics**: Voronoi-approx underwater light mesh (`uCausticIntensity`) shimmers across cave walls, dynamically scaling with audio beats and flow state.
+- **Deep-Sea Vignette**: Smooth radial contrast falloff towards abyss corners.
+- **Radiant Diamond Shard Debris**: Collectibles rendered as glowing multi-stop diamond crystals with rotating core and outer neon aura.
+- **Luminous Lamp Lens Halos**: Player and buddy dive lamps emit radiant halogen bulb glows at beam origins.
+
 ### Uncapped Deterministic Simulation
 - Rating calculation via `calculateMaxPotentialPoints()`.
 - Simulation replicate perfect run (all items, no silt) with combos, cluster boosts, decay gaps to compute max score ($S_{max}$). 5-star rating at $\ge 95\%$ $S_{max}$.

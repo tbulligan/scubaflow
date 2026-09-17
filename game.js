@@ -11,28 +11,53 @@ class PsychedelicFX extends Phaser.Renderer.WebGL.Pipelines.PostFXPipeline {
                 precision mediump float;
                 uniform sampler2D uMainSampler;
                 uniform float uChromaticOffset;
+                uniform float uTime;
+                uniform float uCausticIntensity;
                 varying vec2 outTexCoord;
                 
                 void main() {
-                    // 1. Chromatic Abstraction (horizontal Red/Blue split offset)
-                    vec2 rCoord = outTexCoord + vec2(uChromaticOffset, 0.0);
-                    vec2 bCoord = outTexCoord - vec2(uChromaticOffset, 0.0);
+                    // 1. Organic underwater micro-refraction (liquid wave)
+                    vec2 uv = outTexCoord;
+                    float waveX = sin(uv.y * 14.0 + uTime * 1.5) * 0.0012;
+                    float waveY = cos(uv.x * 12.0 + uTime * 1.2) * 0.0012;
+                    vec2 warpedUV = uv + vec2(waveX, waveY);
+
+                    // 2. Chromatic Aberration on warped coordinates
+                    vec2 rCoord = warpedUV + vec2(uChromaticOffset, 0.0);
+                    vec2 bCoord = warpedUV - vec2(uChromaticOffset, 0.0);
                     
                     float r = texture2D(uMainSampler, rCoord).r;
-                    float g = texture2D(uMainSampler, outTexCoord).g;
+                    float g = texture2D(uMainSampler, warpedUV).g;
                     float b = texture2D(uMainSampler, bCoord).b;
-                    float a = texture2D(uMainSampler, outTexCoord).a;
+                    float a = texture2D(uMainSampler, warpedUV).a;
                     
-                    gl_FragColor = vec4(r, g, b, a);
+                    // 3. Ethereal procedural underwater caustics shimmer
+                    vec2 cUV = uv * vec2(10.0, 6.0);
+                    float p1 = sin(cUV.x + uTime * 0.8) + sin(cUV.y + uTime * 0.9);
+                    float p2 = sin(cUV.x * 0.7 - uTime * 0.7 + p1) + cos(cUV.y * 0.8 + uTime * 0.6 + p1);
+                    float caustic = pow(clamp(0.5 + 0.5 * sin(p2 * 2.5), 0.0, 1.0), 4.0);
+                    vec3 causticCol = vec3(0.0, 0.94, 1.0) * (caustic * uCausticIntensity);
+
+                    // 4. Subtle cinematic edge vignette (deep-sea abyss falloff)
+                    vec2 vigCoord = (uv - 0.5) * vec2(1.25, 1.0);
+                    float vig = clamp(1.0 - dot(vigCoord, vigCoord) * 0.38, 0.0, 1.0);
+
+                    vec3 finalRGB = (vec3(r, g, b) + causticCol) * vig;
+
+                    gl_FragColor = vec4(finalRGB, a);
                 }
             `
         });
         this.chromaticOffset = 0.0;
         this.chromaticOffsetStart = 0.0;
+        this.fxTime = 0.0;
+        this.causticIntensity = 0.035;
     }
     
     onPreRender() {
         this.set1f('uChromaticOffset', this.chromaticOffset);
+        this.set1f('uTime', this.fxTime);
+        this.set1f('uCausticIntensity', this.causticIntensity);
     }
 }
 
@@ -714,6 +739,12 @@ class ScubaFlowScene extends Phaser.Scene {
                 this.drawBuddyVisuals(time);
                 this.drawForegroundBubbles(delta / 1000);
                 this.drawSiltOverlay();
+
+                let fx = this.cameras.main.getPostPipeline(PsychedelicFX);
+                if (fx) {
+                    fx.fxTime = time / 1000;
+                    fx.causticIntensity = 0.035;
+                }
                 return;
             }
 
@@ -1122,9 +1153,14 @@ class ScubaFlowScene extends Phaser.Scene {
                 }
             }
 
-            // Update WebGL PostFX shader parameters (Chromatic Split)
+            // Update WebGL PostFX shader parameters (Chromatic Split, Underwater Refraction & Caustics)
             let fx = this.cameras.main.getPostPipeline(PsychedelicFX);
             if (fx) {
+                fx.fxTime = this.elapsedTime / 1000;
+                let beatBoost = (this.currentBeatPulse || 0) * 0.025;
+                let flowBoost = Math.min(6, this.visualMultiplier - 1) * 0.003;
+                fx.causticIntensity = this.siltActive ? 0.01 : (0.035 + beatBoost + flowBoost);
+
                 // Decay custom level-up chromatic offset
                 if (this.levelUpChromaticOffset > 0) {
                     this.levelUpChromaticOffset = Math.max(0, this.levelUpChromaticOffset - dt * 0.05); // dynamic decay
@@ -1217,17 +1253,32 @@ class ScubaFlowScene extends Phaser.Scene {
 
         if (!this.textures.exists('collectible')) {
             let debCanvas = document.createElement('canvas');
-            debCanvas.width = 24;
-            debCanvas.height = 24;
+            debCanvas.width = 32;
+            debCanvas.height = 32;
             let dCtx = debCanvas.getContext('2d');
-            let dGrad = dCtx.createRadialGradient(12, 12, 2, 12, 12, 12);
-            dGrad.addColorStop(0, 'rgba(255, 255, 255, 1)');
-            dGrad.addColorStop(0.4, 'rgba(255, 255, 255, 0.4)');
-            dGrad.addColorStop(1, 'rgba(0,0,0,0)');
+            
+            // Soft outer neon glow aura
+            let dGrad = dCtx.createRadialGradient(16, 16, 2, 16, 16, 15);
+            dGrad.addColorStop(0, 'rgba(255, 255, 255, 1.0)');
+            dGrad.addColorStop(0.35, 'rgba(255, 255, 255, 0.7)');
+            dGrad.addColorStop(0.7, 'rgba(255, 255, 255, 0.2)');
+            dGrad.addColorStop(1, 'rgba(255, 255, 255, 0)');
             dCtx.fillStyle = dGrad;
             dCtx.beginPath();
-            dCtx.arc(12, 12, 12, 0, Math.PI * 2);
+            dCtx.arc(16, 16, 15, 0, Math.PI * 2);
             dCtx.fill();
+
+            // Radiant diamond shard core
+            dCtx.save();
+            dCtx.translate(16, 16);
+            dCtx.rotate(Math.PI / 4);
+            dCtx.fillStyle = 'rgba(255, 255, 255, 0.95)';
+            dCtx.fillRect(-4, -4, 8, 8);
+            dCtx.strokeStyle = 'rgba(255, 255, 255, 0.85)';
+            dCtx.lineWidth = 1.5;
+            dCtx.strokeRect(-6, -6, 12, 12);
+            dCtx.restore();
+
             this.textures.addCanvas('collectible', debCanvas);
         }
 
@@ -2175,6 +2226,12 @@ class ScubaFlowScene extends Phaser.Scene {
         }
         g.closePath();
         g.fillPath();
+
+        // Draw luminous lamp bulb lens glow
+        g.fillStyle(0xffffff, 0.45 * intensity);
+        g.fillCircle(x0, y0, 3.5);
+        g.fillStyle(lightCol, 0.22 * intensity);
+        g.fillCircle(x0, y0, 9.0);
 
         return { x0: x0, dir: dir, topPoints: topPoints, bottomPoints: bottomPoints };
     }
@@ -3717,6 +3774,8 @@ class ScubaFlowScene extends Phaser.Scene {
         if (fx) {
             fx.chromaticOffset = 0.0;
             fx.chromaticOffsetStart = 0.0;
+            fx.fxTime = 0.0;
+            fx.causticIntensity = 0.035;
         }
 
         // Reset low-pass audio filter if active
@@ -4483,6 +4542,10 @@ class ScubaFlowScene extends Phaser.Scene {
         for (let b of this.activeSiltBursts) b.destroy();
         this.activeSiltBursts = [];
         console.assert(this.activeSiltBursts.length === 0, "Assertion Failed: activeSiltBursts must clear on reset");
+
+        let mockFX = new PsychedelicFX({});
+        console.assert(mockFX.causticIntensity !== undefined, "Assertion Failed: PsychedelicFX must have causticIntensity uniform");
+        console.assert(mockFX.fxTime !== undefined, "Assertion Failed: PsychedelicFX must have fxTime uniform");
 
         console.log("=== DIAGNOSTICS PASSED: ALL CONTROLS FUNCTIONAL ===");
     }
