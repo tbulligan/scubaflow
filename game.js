@@ -2308,21 +2308,22 @@ class ScubaFlowScene extends Phaser.Scene {
         let lineHue = (this.baseHue + 40) % 360;
         let lineColor = Phaser.Display.Color.HSLToColor(lineHue / 360, 1.0, 0.6).color;
 
+        let blendRange = 150; // Smooth blending over the last 150px before the reel
+        const getLineY = (lx) => {
+            let t = (lx / this.baseScrollSpeed) * 1000;
+            let pathY = this.getTargetYAtTime(t);
+            let distToReel = endX - lx;
+            let blend = distToReel < blendRange ? (1 - distToReel / blendRange) : 0;
+            return pathY * (1 - blend) + reelWorldY * blend;
+        };
+
         g.lineStyle(1.5, lineColor, 0.75);
         g.beginPath();
 
         let first = true;
-        let blendRange = 150; // Smooth blending over the last 150px before the reel
-
-        for (let x = startX; x <= endX; x += 15) {
-            let t = (x / this.baseScrollSpeed) * 1000;
-            let pathY = this.getTargetYAtTime(t);
-
-            // Blend path Y towards reel Y as x approaches the reel
-            let distToReel = endX - x;
-            let blend = distToReel < blendRange ? (1 - distToReel / blendRange) : 0;
-            let y = pathY * (1 - blend) + reelWorldY * blend;
-
+        // Fine-grained step to prevent chord separation on curves
+        for (let x = startX; x <= endX; x += 8) {
+            let y = getLineY(x);
             if (first) {
                 g.moveTo(x, y);
                 first = false;
@@ -2334,24 +2335,36 @@ class ScubaFlowScene extends Phaser.Scene {
         g.lineTo(reelWorldX, reelWorldY);
         g.strokePath();
 
-        // Draw cave arrows pointing exit-ward (left) along the line
-        g.fillStyle(lineColor, 0.85);
-        let arrowInterval = 160;
+        // Draw cave directional arrows tightly affixed to and rotated along the line tangent
+        g.fillStyle(lineColor, 0.9);
+        let arrowInterval = 140;
         let nextArrowX = Math.ceil(startX / arrowInterval) * arrowInterval;
-        for (let x = nextArrowX; x < endX - 40; x += arrowInterval) {
-            let t = (x / this.baseScrollSpeed) * 1000;
-            let pathY = this.getTargetYAtTime(t);
+        for (let x = nextArrowX; x < endX - 35; x += arrowInterval) {
+            let y = getLineY(x);
+            let yPrev = getLineY(x - 3);
+            let yNext = getLineY(x + 3);
+            let angle = Math.atan2(yNext - yPrev, 6);
 
-            // Blend arrow Y towards reel Y as x approaches the reel
-            let distToReel = endX - x;
-            let blend = distToReel < blendRange ? (1 - distToReel / blendRange) : 0;
-            let y = pathY * (1 - blend) + reelWorldY * blend;
+            // Direction towards exit is backwards along line (opposite to cave progression)
+            let exitAngle = angle + Math.PI;
+            let normAngle = exitAngle + Math.PI / 2;
 
-            // Draw triangle pointing left (exit)
+            let tipX = x + Math.cos(exitAngle) * 5.5;
+            let tipY = y + Math.sin(exitAngle) * 5.5;
+
+            let baseCenterX = x - Math.cos(exitAngle) * 3.5;
+            let baseCenterY = y - Math.sin(exitAngle) * 3.5;
+
+            let halfW = 4.0;
+            let c1X = baseCenterX + Math.cos(normAngle) * halfW;
+            let c1Y = baseCenterY + Math.sin(normAngle) * halfW;
+            let c2X = baseCenterX - Math.cos(normAngle) * halfW;
+            let c2Y = baseCenterY - Math.sin(normAngle) * halfW;
+
             g.beginPath();
-            g.moveTo(x - 5, y);
-            g.lineTo(x + 3, y - 4);
-            g.lineTo(x + 3, y + 4);
+            g.moveTo(tipX, tipY);
+            g.lineTo(c1X, c1Y);
+            g.lineTo(c2X, c2Y);
             g.closePath();
             g.fillPath();
         }
@@ -3147,10 +3160,10 @@ class ScubaFlowScene extends Phaser.Scene {
 
         // Compute minimum half-height clearance needed for player's horizontal bounding box
         // Sinking/descending is harder to react to, so downward slopes get symmetric/sufficient clearance.
-        let slopeClearance = 28.5 + (slope < 0 ? -29.0 * slope : 32.0 * slope);
+        let slopeClearance = 31.0 + (slope < 0 ? -34.0 * slope : 36.0 * slope);
 
         // Ensure baseOffset expands to allow clearance plus some margin
-        let baseOffset = Math.max(78 - localEnergy * 22, slopeClearance + 5); // 56–78px minimum base
+        let baseOffset = Math.max(78 - localEnergy * 22, slopeClearance + 6); // 56–78px minimum base
         let jaggednessMultiplier = 0.35 + localEnergy * 0.85;
 
         // Beat pulse scaled by multiplier — expands the cave on beat hits
@@ -3168,7 +3181,7 @@ class ScubaFlowScene extends Phaser.Scene {
         }
 
         // Dynamic minimum safety cap: shrinks from 68px (calm) to 50px (intense/metal), but must respect slopeClearance
-        let minCap = Math.max(68 - localEnergy * 18, slopeClearance);
+        let minCap = Math.max(68 - localEnergy * 18, slopeClearance + 2);
 
         // High-frequency rocky spikiness projections (scaled by energy)
         let highFreqSpikeF = (Math.sin(wx * 0.09) * 8 + Math.cos(wx * 0.18) * 4) * jaggednessMultiplier;

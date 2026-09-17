@@ -56,7 +56,7 @@ For ScubaFlow:
 ### Slope Clearance & Collision Navigability
 - Prevent impossible collisions on steep slopes for $64\text{px}$ player shape:
   - Sample corridor slope $S = dy/dx$ from path center generator.
-  - Scale `minCap` and `baseOffset` with `slopeClearance = 28.5 + (S < 0 ? -29.0 * S : 32.0 * S)` to expand cave on steep sections.
+  - Scale `minCap` and `baseOffset` with `slopeClearance = 31.0 + (S < 0 ? -34.0 * S : 36.0 * S)` to expand cave on steep sections.
   - Tunnels stay navigable. Procedural collectibles (up to $24\text{px}$ offset, clamped $\ge 40\text{px}$ clear from boundaries) attainable without collision.
 - **Stable Cave Geometry**: Cave boundaries (`getWallOffsets`, `drawTerrain`) stable, not warped by beat pulses.
 
@@ -107,7 +107,7 @@ Feedback physical + auditory:
   - **Dynamic Color Shifts**: Shift `this.baseHue` by 120 deg on wall collision, update cave palette + silt particle color.
   - **Light Failure**: Primary light cone contract to 5% capacity on impact, scale back to 100% as silt decay.
   - **Aura Vaporization**: Active neon oscilloscope aura rings reset to 0 on impact.
-  - **Guideline Lifeline**: Buddy guide line on terrain layer (depth 0), obscured by silt. Player follow buddy speech bubbles ("👌?") at depth 20.
+  - **Guideline Lifeline**: Buddy guide line on terrain layer (depth 0), obscured by silt. High-fidelity 8px sampling with directional cave exit arrows rotated along line slope tangent (tightly affixed, zero chord separation). Player follow buddy speech bubbles ("👌?") at depth 20.
 - **AI Buddy**: Speech bubbles ("👌?", "👌!") assist player. Terrain clamping (15px margin, 2px absolute margin) prevent wall collision / sediment.
 - **Realistic Flashlight Occlusion**: Flashlight beam raycast shadow-casting obstructed by terrain protrusions. Snow illumination check interpolate occluded beam points.
 
