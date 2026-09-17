@@ -173,8 +173,29 @@ class ScubaFlowScene extends Phaser.Scene {
         this.targetEndX = 0;
         this.exhaleBubblesCount = 0;
         this.marineSnowMotes = [];
-        this.playerBeam = null;
-        this.buddyBeam = null;
+        // Raycast points pre-allocation for zero GC churn
+        this.playerLightCache = {
+            x0: 0,
+            dir: 1,
+            topPoints: Array.from({ length: 32 }, () => ({ x: 0, y: 0 })),
+            bottomPoints: Array.from({ length: 32 }, () => ({ x: 0, y: 0 }))
+        };
+        this.buddyLightCache = {
+            x0: 0,
+            dir: 1,
+            topPoints: Array.from({ length: 32 }, () => ({ x: 0, y: 0 })),
+            bottomPoints: Array.from({ length: 32 }, () => ({ x: 0, y: 0 }))
+        };
+        this.playerBeam = this.playerLightCache;
+        this.buddyBeam = this.buddyLightCache;
+
+        // Live Audio Reactivity State
+        this.audioAnalyser = null;
+        this.freqData = null;
+        this.liveAudioEnergy = 0;
+        this.liveBassLevel = 0;
+        this.liveBassTransient = 0;
+        this.prevLiveBass = 0;
 
         // Point Arrays pre-allocation for zero GC churn
         this.floorPoints = [];
@@ -1105,7 +1126,41 @@ class ScubaFlowScene extends Phaser.Scene {
                 }
             }
 
-            // 5. Beat Pulse & concentric ripples spawn checks
+            // 5. Beat Pulse & Live Audio Reactivity
+            if (this.audioAnalyser && this.freqData) {
+                this.audioAnalyser.getByteFrequencyData(this.freqData);
+                // Sub-bass band: bins 0 to 6 (~0 to 500Hz)
+                let bassSum = 0;
+                for (let b = 0; b <= 6; b++) {
+                    bassSum += this.freqData[b];
+                }
+                let liveBass = bassSum / (7 * 255);
+
+                // Overall audible spectrum: bins 0 to 64 (~0 to 5.5kHz)
+                let energySum = 0;
+                for (let b = 0; b < 64; b++) {
+                    energySum += this.freqData[b];
+                }
+                let liveEnergy = energySum / (64 * 255);
+
+                // Transient flux detection: positive attack onset without DC floor elevation
+                let deltaBass = Math.max(0, liveBass - (this.prevLiveBass || 0));
+                this.prevLiveBass = liveBass;
+                let fluxKick = deltaBass * 2.8;
+                // Fast exponential decay (e^-14*dt ~ 120ms decay to zero)
+                this.liveBassTransient = Math.max(fluxKick, (this.liveBassTransient || 0) * Math.exp(-dt * 14.0));
+
+                // Sustained sub-bass DC level (continuous acoustic pressure)
+                this.liveBassLevel = Phaser.Math.Linear(this.liveBassLevel || 0, liveBass, 0.25);
+                // Audible spectrum energy (mids/highs shimmer)
+                this.liveAudioEnergy = Phaser.Math.Linear(this.liveAudioEnergy || 0, liveEnergy, 0.3);
+            } else {
+                this.liveBassTransient = 0;
+                this.liveBassLevel = 0;
+                this.liveAudioEnergy = 0;
+                this.prevLiveBass = 0;
+            }
+
             let lastBeatTime = -99999;
             let beats = this.levelData.beats || [];
             for (let i = 0; i < beats.length; i++) {
@@ -1158,7 +1213,9 @@ class ScubaFlowScene extends Phaser.Scene {
                     pulse = p * p;
                 }
             }
-            this.currentBeatPulse = pulse;
+            // Fuse offline transient envelope with live bass transient punch (both decay to 0, zero floor trapping)
+            let liveTransient = Math.min(1.0, this.liveBassTransient || 0);
+            this.currentBeatPulse = Math.max(pulse, liveTransient);
 
             // Update active background ripples
             for (let i = this.beatRipples.length - 1; i >= 0; i--) {
@@ -1288,10 +1345,13 @@ class ScubaFlowScene extends Phaser.Scene {
             // Update WebGL PostFX shader parameters (Chromatic Split, Underwater Refraction & Caustics)
             let fx = this.cameras.main.getPostPipeline(PsychedelicFX);
             if (fx) {
-                fx.fxTime = this.elapsedTime / 1000;
+                // Sub-bass acoustic pressure gently modulates underwater refraction wave rate
+                fx.fxTime = (this.elapsedTime / 1000) * (1.0 + (this.liveBassLevel || 0) * 0.25);
                 let beatBoost = (this.currentBeatPulse || 0) * 0.025;
                 let flowBoost = Math.min(6, this.visualMultiplier - 1) * 0.003;
-                fx.causticIntensity = this.siltActive ? 0.01 : (0.035 + beatBoost + flowBoost);
+                // High/mid audible spectrum energy directly drives caustics shimmering glint
+                let liveCausticBoost = (this.liveAudioEnergy || 0) * 0.035;
+                fx.causticIntensity = this.siltActive ? 0.01 : (0.035 + beatBoost + flowBoost + liveCausticBoost);
 
                 // Decay custom level-up chromatic offset
                 if (this.levelUpChromaticOffset > 0) {
@@ -1689,9 +1749,10 @@ class ScubaFlowScene extends Phaser.Scene {
 
             let illuminated = inPlayerCone || inBuddyCone;
             
-            // Adjust alpha targets. At x10+, make everything significantly brighter for "wow" effect!
+            // Adjust alpha targets with live audible spectrum glint. At x10+, make everything significantly brighter for "wow" effect!
             let isSuper = currentVisMult >= 9.5;
-            let targetAlpha = isSuper ? (illuminated ? 0.85 : 0.25) : (illuminated ? 0.40 : 0.05);
+            let audioGlint = (this.liveAudioEnergy || 0) * 0.14;
+            let targetAlpha = (isSuper ? (illuminated ? 0.85 : 0.25) : (illuminated ? 0.40 : 0.05)) + audioGlint;
             mote.alpha += (targetAlpha - mote.alpha) * 0.1;
 
             // Hide marine snow that is inside the cave walls (terrain)
@@ -2385,7 +2446,7 @@ class ScubaFlowScene extends Phaser.Scene {
         // Player Light (hand is at 26, -2 relative to player container)
         let pHandX = this.player.x + 26;
         let pHandY = this.player.y - 2;
-        this.playerBeam = this.drawDiveLight(g, pHandX, pHandY, 1, 0xffffff, pAccent, pHue, true);
+        this.playerBeam = this.drawDiveLight(g, pHandX, pHandY, 1, 0xffffff, pAccent, pHue, true, this.playerLightCache);
 
         // Buddy Light (hand is at 26, -2 relative to buddy container, scaled by scaleX)
         let bDir = this.buddy.scaleX; // 1 or -1
@@ -2393,10 +2454,10 @@ class ScubaFlowScene extends Phaser.Scene {
         let bHandY = this.buddy.y - 2;
 
         this.buddy.rotation = 0;
-        this.buddyBeam = this.drawDiveLight(g, bHandX, bHandY, bDir, 0xffffff, bAccent, bHue, false);
+        this.buddyBeam = this.drawDiveLight(g, bHandX, bHandY, bDir, 0xffffff, bAccent, bHue, false, this.buddyLightCache);
     }
 
-    drawDiveLight(g, x0, y0, dir, mainColor, accentColor, hueVal, isPlayer = false) {
+    drawDiveLight(g, x0, y0, dir, mainColor, accentColor, hueVal, isPlayer = false, beamCache = null) {
         let beamLength = 320;
         let beamSpread = 75;
         let steps = 30;
@@ -2412,8 +2473,14 @@ class ScubaFlowScene extends Phaser.Scene {
 
         let lightCol = this.hslToColorInt(hueVal, flowSat, 0.65 + flowLightBoost);
 
-        let topPoints = [];
-        let bottomPoints = [];
+        let topPoints = beamCache ? beamCache.topPoints : [];
+        let bottomPoints = beamCache ? beamCache.bottomPoints : [];
+        if (beamCache) {
+            beamCache.x0 = x0;
+            beamCache.dir = dir;
+            beamCache.topPoints.length = steps + 1;
+            beamCache.bottomPoints.length = steps + 1;
+        }
         
         let maxCeilSlope = -999999;
         let minFloorSlope = 999999;
@@ -2463,14 +2530,25 @@ class ScubaFlowScene extends Phaser.Scene {
             cTop = Phaser.Math.Clamp(cTop, ceilLimitY, floorLimitY);
             cBottom = Phaser.Math.Clamp(cBottom, ceilLimitY, floorLimitY);
 
-            topPoints.push({ x: x, y: cTop });
-            bottomPoints.push({ x: x, y: cBottom });
+            if (beamCache) {
+                if (!beamCache.topPoints[i]) beamCache.topPoints[i] = { x: 0, y: 0 };
+                beamCache.topPoints[i].x = x;
+                beamCache.topPoints[i].y = cTop;
+
+                if (!beamCache.bottomPoints[i]) beamCache.bottomPoints[i] = { x: 0, y: 0 };
+                beamCache.bottomPoints[i].x = x;
+                beamCache.bottomPoints[i].y = cBottom;
+            } else {
+                topPoints.push({ x: x, y: cTop });
+                bottomPoints.push({ x: x, y: cBottom });
+            }
         }
 
         // Continuous gradual light progression from origin to tip
         // Smooth monotonic attenuation with zero-slope feathered dissipation at beam limits
-        let peakMainAlpha = (0.28 + (this.visualMultiplier - 1) * 0.03) * intensity;
-        let peakCoreAlpha = (0.14 + (this.visualMultiplier - 1) * 0.015) * intensity;
+        let beamAudioBoost = 1.0 + (this.liveBassTransient || 0) * 0.45;
+        let peakMainAlpha = (0.28 + (this.visualMultiplier - 1) * 0.03) * intensity * beamAudioBoost;
+        let peakCoreAlpha = (0.14 + (this.visualMultiplier - 1) * 0.015) * intensity * beamAudioBoost;
         let coreCutoff = 0.72;
 
         let tMain = (t) => {
@@ -2524,20 +2602,25 @@ class ScubaFlowScene extends Phaser.Scene {
             }
         }
 
-        // Draw luminous lamp bulb lens glow with gradual optical bloom
+        // Draw luminous lamp bulb lens glow with gradual optical bloom and live audio transient flare
+        let liveFlare = 1.0 + (this.liveBassTransient || 0) * 0.65;
         if (typeof g.fillCircle === 'function') {
-            g.fillStyle(0xffffff, 0.60 * intensity);
-            g.fillCircle(x0, y0, 2.5);
-            g.fillStyle(0xffffff, 0.32 * intensity);
-            g.fillCircle(x0, y0, 5.5);
-            g.fillStyle(lightCol, 0.20 * intensity);
-            g.fillCircle(x0, y0, 9.5);
-            g.fillStyle(lightCol, 0.08 * intensity);
-            g.fillCircle(x0, y0, 14.5);
+            // Radiant optical lens bloom halo (wide, soft falloff projecting forward into the water)
+            g.fillStyle(lightCol, 0.045 * intensity * liveFlare);
+            g.fillCircle(x0 + 6 * dir, y0, 36 * liveFlare);
+            g.fillStyle(lightCol, 0.09 * intensity * liveFlare);
+            g.fillCircle(x0 + 4 * dir, y0, 22 * liveFlare);
+
+            // Core halogen bulb lens glow
+            g.fillStyle(lightCol, 0.22 * intensity * liveFlare);
+            g.fillCircle(x0, y0, 12 * liveFlare);
+            g.fillStyle(0xffffff, 0.45 * intensity * liveFlare);
+            g.fillCircle(x0, y0, 6 * liveFlare);
+            g.fillStyle(0xffffff, 0.85 * intensity * liveFlare);
+            g.fillCircle(x0, y0, 3 * liveFlare);
         }
 
-
-        return { x0: x0, dir: dir, topPoints: topPoints, bottomPoints: bottomPoints };
+        return beamCache || { x0: x0, dir: dir, topPoints: topPoints, bottomPoints: bottomPoints };
     }
 
     drawGuideLine() {
@@ -2679,7 +2762,8 @@ class ScubaFlowScene extends Phaser.Scene {
 
             let backwallHue = (floorHue + 210) % 360;
             let backwallColor = this.hslToColorInt(backwallHue / 360, 0.50, 0.09 + flowFill * 0.05);
-            let backwallAlpha = this.siltActive ? 0.22 : Math.min(0.75, 0.60 + flowFill * 0.15);
+            let subBassRumble = (this.liveBassLevel || 0) * 0.12;
+            let backwallAlpha = (this.siltActive ? 0.22 : Math.min(0.75, 0.60 + flowFill * 0.15)) + subBassRumble;
 
             // 1. Solid ambient backwall filling corridor between ceiling and floor
             bg.fillStyle(backwallColor, backwallAlpha);
@@ -2696,40 +2780,40 @@ class ScubaFlowScene extends Phaser.Scene {
 
 
 
-            // 3. Volumetric Torch Backwall Reflection (Soft elliptical spotlight projected on rear wall)
+            // 3. Volumetric Torch Backwall Reflection (Soft elliptical spotlight anchored to torch heads)
             if (!this.siltActive) {
-                // Player Torch Backwall Reflection
+                // Player Torch Backwall Reflection (anchored to torch at px + 26, tracking beam origin)
                 if (this.player) {
                     let px = this.player.x;
-                    let rx = px + 130;
-                    let { floorY: pF, ceilY: pC } = this.getWallY(rx);
-                    let ryMax = Math.min(52, (pF - pC) * 0.38);
-                    let clampedPy = Phaser.Math.Clamp(this.player.y, pC + ryMax * 0.85, pF - ryMax * 0.85);
+                    let spotX = px + 40;
+                    let { floorY: pF, ceilY: pC } = this.getWallY(spotX);
+                    let ryMax = Math.min(50, (pF - pC) * 0.40);
+                    let clampedPy = Phaser.Math.Clamp(this.player.y - 2, pC + ryMax * 0.85, pF - ryMax * 0.85);
 
                     let torchHue = (floorHue + 25) % 360;
                     let torchBackCol = this.hslToColorInt(torchHue / 360, 0.85, 0.38);
                     let torchIntensity = (this.lightFlashIntensity !== undefined ? this.lightFlashIntensity : 1.0);
-                    bg.fillStyle(torchBackCol, 0.15 * torchIntensity);
-                    bg.fillEllipse(rx, clampedPy, 240, ryMax * 2);
+                    bg.fillStyle(torchBackCol, 0.16 * torchIntensity);
+                    bg.fillEllipse(spotX, clampedPy, 160, ryMax * 1.8);
                     bg.fillStyle(0xffffff, 0.08 * torchIntensity);
-                    bg.fillEllipse(px + 80, clampedPy, 110, ryMax);
+                    bg.fillEllipse(spotX - 10, clampedPy, 85, ryMax * 0.95);
                 }
 
-                // Buddy Torch Backwall Reflection
+                // Buddy Torch Backwall Reflection (anchored to buddy torch tracking beam origin & direction)
                 if (this.buddy) {
                     let bx = this.buddy.x;
                     let bDir = this.buddy.scaleX || 1;
-                    let brx = bx + 110 * bDir;
-                    let { floorY: bF, ceilY: bC } = this.getWallY(brx);
-                    let bryMax = Math.min(46, (bF - bC) * 0.35);
-                    let clampedBy = Phaser.Math.Clamp(this.buddy.y, bC + bryMax * 0.85, bF - bryMax * 0.85);
+                    let bSpotX = bx + 35 * bDir;
+                    let { floorY: bF, ceilY: bC } = this.getWallY(bSpotX);
+                    let bryMax = Math.min(46, (bF - bC) * 0.38);
+                    let clampedBy = Phaser.Math.Clamp(this.buddy.y - 2, bC + bryMax * 0.85, bF - bryMax * 0.85);
 
                     let buddyHue = (floorHue + 140) % 360;
                     let buddyBackCol = this.hslToColorInt(buddyHue / 360, 0.85, 0.38);
-                    bg.fillStyle(buddyBackCol, 0.12);
-                    bg.fillEllipse(brx, clampedBy, 210, bryMax * 2);
+                    bg.fillStyle(buddyBackCol, 0.13);
+                    bg.fillEllipse(bSpotX, clampedBy, 150, bryMax * 1.8);
                     bg.fillStyle(0xffffff, 0.06);
-                    bg.fillEllipse(bx + 60 * bDir, clampedBy, 90, bryMax);
+                    bg.fillEllipse(bSpotX - 10 * bDir, clampedBy, 80, bryMax * 0.95);
                 }
             }
         }
@@ -3437,6 +3521,7 @@ class ScubaFlowScene extends Phaser.Scene {
         if (this.useAutopilot) {
             return this.simulatedSpaceDown;
         }
+        // TODO: Gamepad API trigger polling (navigator.getGamepads() L2/R2 analog buoyancy control)
         const keyboardDown = Boolean(this.spaceKey && this.spaceKey.isDown);
         const pointerDown = Boolean(
             this.screenTouchActive ||
@@ -3600,7 +3685,17 @@ class ScubaFlowScene extends Phaser.Scene {
     setupAudioEngine(ctx) {
         this.masterGain = ctx.createGain();
         this.masterGain.gain.value = 0.95;
-        this.masterGain.connect(ctx.destination);
+
+        // Master dynamics compressor prevents synthesizer beeps and silt thuds from clipping/masking music
+        this.masterCompressor = ctx.createDynamicsCompressor();
+        this.masterCompressor.threshold.setValueAtTime(-18, ctx.currentTime);
+        this.masterCompressor.knee.setValueAtTime(12, ctx.currentTime);
+        this.masterCompressor.ratio.setValueAtTime(4, ctx.currentTime);
+        this.masterCompressor.attack.setValueAtTime(0.005, ctx.currentTime);
+        this.masterCompressor.release.setValueAtTime(0.15, ctx.currentTime);
+
+        this.masterGain.connect(this.masterCompressor);
+        this.masterCompressor.connect(ctx.destination);
 
         let audioBuffer = this.customDecodedBuffer;
         this.musicSource = ctx.createBufferSource();
@@ -3615,9 +3710,16 @@ class ScubaFlowScene extends Phaser.Scene {
         this.musicFilter.type = 'lowpass';
         this.musicFilter.frequency.value = 22000;
 
+        // Real-time live audio frequency analyser (low smoothing for crisp transient attacks)
+        this.audioAnalyser = ctx.createAnalyser();
+        this.audioAnalyser.fftSize = 256;
+        this.audioAnalyser.smoothingTimeConstant = 0.35;
+        this.freqData = new Uint8Array(this.audioAnalyser.frequencyBinCount);
+
         this.musicSource.connect(this.musicGain);
         this.musicGain.connect(this.musicFilter);
         this.musicFilter.connect(this.masterGain);
+        this.musicFilter.connect(this.audioAnalyser);
         this.musicStartTime = ctx.currentTime;
 
         this.musicSource.onended = () => {
@@ -4136,6 +4238,10 @@ class ScubaFlowScene extends Phaser.Scene {
         this.isLevelCompleted = false;
         this.lastProcessedBeatIdx = -1;
         this.beatRipples = [];
+        this.liveBassLevel = 0;
+        this.liveBassTransient = 0;
+        this.liveAudioEnergy = 0;
+        this.prevLiveBass = 0;
 
         // Complete reset of silt-out state & visual distortion
         this.siltActive = false;
@@ -4268,6 +4374,9 @@ class ScubaFlowScene extends Phaser.Scene {
                 this.masterGain.gain.setValueAtTime(0, this.audioContext.currentTime);
             } catch(e) {}
         }
+        if (this.audioAnalyser) {
+            try { this.audioAnalyser.disconnect(); } catch(e) {}
+        }
     }
 
     exitToTrackSelect() {
@@ -4326,6 +4435,15 @@ class ScubaFlowScene extends Phaser.Scene {
 
         // Completely stop and disconnect all audio generators to avoid background drone leakage
         this.stopAllAudio();
+        if (this.audioAnalyser) {
+            try { this.audioAnalyser.disconnect(); } catch(e) {}
+            this.audioAnalyser = null;
+            this.freqData = null;
+        }
+        if (this.masterCompressor) {
+            try { this.masterCompressor.disconnect(); } catch(e) {}
+            this.masterCompressor = null;
+        }
         if (this.masterGain) {
             try { this.masterGain.disconnect(); } catch(e) {}
             this.masterGain = null;
@@ -5140,6 +5258,29 @@ class ScubaFlowScene extends Phaser.Scene {
         console.assert(typeof this.smoothVisualMultiplier === 'number', "Assertion Failed: smoothVisualMultiplier must be initialized");
         let calmWallOffsets = this.getWallOffsets(1500, 0.04);
         console.assert(calmWallOffsets && typeof calmWallOffsets.floorOffset === 'number', "Assertion Failed: getWallOffsets must return valid numbers for calm track energy");
+
+        // Test 19: Zero-GC Raycast Cache & Live Audio Reactivity State
+        console.assert(this.playerLightCache && Array.isArray(this.playerLightCache.topPoints), "Assertion Failed: playerLightCache must be pre-allocated");
+        console.assert(this.buddyLightCache && Array.isArray(this.buddyLightCache.topPoints), "Assertion Failed: buddyLightCache must be pre-allocated");
+        console.assert(this.playerLightCache.topPoints.length >= 31, "Assertion Failed: playerLightCache must hold at least 31 raycast points");
+        let dummyMockG = { clear: () => {}, fillStyle: () => {}, beginPath: () => {}, moveTo: () => {}, lineTo: () => {}, closePath: () => {}, fillPath: () => {}, fillCircle: () => {} };
+        let cachedResult = this.drawDiveLight(dummyMockG, 100, 200, 1, 0xffffff, 0x00f0ff, 0.5, true, this.playerLightCache);
+        console.assert(cachedResult === this.playerLightCache, "Assertion Failed: drawDiveLight must mutate and return pre-allocated beamCache");
+        console.assert(typeof this.liveBassLevel === 'number' && typeof this.liveBassTransient === 'number' && typeof this.liveAudioEnergy === 'number', "Assertion Failed: Live audio reactivity levels must be initialized numbers");
+
+        // Validate drawCaveLights end-to-end execution
+        let savedLightG = this.lightGraphics;
+        let savedPlayer = this.player;
+        let savedBuddy = this.buddy;
+        this.lightGraphics = dummyMockG;
+        this.player = { x: 250, y: 300 };
+        this.buddy = { x: 550, y: 300, scaleX: 1, rotation: 0 };
+        this.drawCaveLights();
+        console.assert(this.playerBeam && this.playerBeam.topPoints.length === 31, "Assertion Failed: drawCaveLights must compute playerBeam");
+        console.assert(this.buddyBeam && this.buddyBeam.topPoints.length === 31, "Assertion Failed: drawCaveLights must compute buddyBeam");
+        this.lightGraphics = savedLightG;
+        this.player = savedPlayer;
+        this.buddy = savedBuddy;
 
         console.log("=== DIAGNOSTICS PASSED: ALL CONTROLS FUNCTIONAL ===");
     }

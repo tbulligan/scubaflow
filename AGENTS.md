@@ -40,6 +40,11 @@ For ScubaFlow:
   - Seed custom Mulberry32 PRNG with hash.
   - All randomized choices (`forceSpawn` clusters, slope directions) use PRNG instead of `Math.random()`. Same audio produce identical layout, collectibles, max score.
 - **Audio Normalization**: Stereo-safe in-place normalization before generation + playback. Scale channels uniformly to peak amplitude `0.98`.
+- **Master Dynamics Compressor**: Soft limiter (`DynamicsCompressorNode`, threshold `-18dB`, knee `12dB`, ratio `4:1`) inserted between master gain and audio destination, preventing collectible tones and silt rumbles from clipping or masking user music.
+- **Live Audio Reactivity & AnalyserNode**: Live 256-point FFT `AnalyserNode` connected downstream of silt lowpass filter. Features 3-tier acoustic signal routing:
+  - **Sub-Bass Transient Flux** ($\Delta\text{Bass}^+ = \max(0, \text{Bass}_t - \text{Bass}_{t-1})$ with $e^{-14 \cdot dt}$ decay): Delivers punchy transient kicks to halogen torch bloom (`liveFlare`) and cleanly fuses with offline beat pulse (`currentBeatPulse`) with zero DC floor trapping (allowing physical cave walls to breathe and fully contract).
+  - **Sub-Bass DC Level** (Acoustic Pressure): Modulates 2.5D cavern backwall ambient grotto depth (`backwallAlpha`) and liquid micro-refraction wave time (`fx.fxTime`).
+  - **Audible Spectrum Energy** (Mids/Highs Bins 0-64): Drives WebGL dynamic water caustics shimmer (`fx.causticIntensity`) and marine snow bioluminescent glint (`audioGlint`).
 
 ### Breath Physics & State Machine
 - Vertical motion via buoyancy + drag physics:
@@ -129,6 +134,7 @@ Feedback physical + auditory:
   - **Center-Channel Scout Drafting**: Buddy tracks true corridor midpoint (`(floorY + ceilY) * 0.5`) with organic sinusoidal breathing sway ($\pm 10\text{px}$) and generous boundary margins ($18\text{–}32\text{px}$). Fluid exponential glide ($k = 2.2$ on Y, $k = 0.9$ on X) absorbs high-frequency rock spikiness and decouples flipper flutter, eliminating jitter and rock hugging.
   - **Horizontal Trim**: Divers maintain realistic technical cave diving horizontal trim with level forward-facing dive lamps, eliminating unnatural tilt jitter.
 - **Realistic Flashlight Occlusion & Continuous Gradual Attenuation**: Flashlight beam raycast shadow-casting obstructed by terrain protrusions. Multi-slice progressive polynomial attenuation ($T(t) = (1 - t^2)^2$) smoothly tapers beam from emitter to zero at outer range without stepped cutoff bands. Snow illumination check interpolate occluded beam points.
+  - **Zero-GC Raycast Caching**: `playerLightCache` and `buddyLightCache` pre-allocate static 32-point coordinate buffers on scene initialization, mutating points in-place during raycasting to eliminate 7,200 object allocations/second during active dive gameplay.
 - **Mobile Web Haptics API (`navigator.vibrate`)**:
   - Breath transition: $12\text{ms}$ tap on inhalation/exhalation turnaround.
   - Collectibles: $8\text{ms}$ click on debris pickup, $[20, 35, 25]\text{ms}$ double-pulse chord on cluster completion.
@@ -162,9 +168,9 @@ Multiplier $\ge \times 10$:
 - **Deep-Sea Edge Vignette**: Smooth radial contrast falloff (`dot * 0.85`) gently dimming screen corners and edges toward pitch-black void `#000206` without washing out scene contrast.
 - **Radiant Diamond Shard Debris & Glint Sparks**: Collectibles rendered as glowing multi-stop diamond crystals with rotating core and outer neon aura. Debris explosions release 4-point diamond glint stars.
 - **Translucent Scuba Bubbles & Specular Sheen**: Dedicated procedural bubble texture featuring spherical glass membrane, internal refraction, and dual specular light highlights for breathing exhales and ambient floating bubbles.
-- **Luminous Lamp Lens Halos**: Player and buddy dive lamps emit radiant multi-ring halogen bulb blooms at beam origins with smooth optical falloff.
+- **Luminous Lamp Lens Halos & Beam Audio Boost**: Player and buddy dive lamps emit radiant multi-ring halogen bulb blooms ($36\text{px}$ optical flare) at beam origins with smooth optical falloff. Transient drum kicks drive real-time flashlight cone luminosity pulses (`beamAudioBoost = 1.0 + liveBassTransient * 0.45`), illuminating the entire 320px corridor on beat.
 - **2.5D Multi-Plane Cavern Depth & Parallax Sandwich**:
-  - **Recessed Cavern Backwall (`depth -0.5`)**: Fills corridor between ceiling and floor with an ambient grotto tone and corridor-clamped soft elliptical flashlight reflection spots tracking both player and buddy dive lamps across the rear wall without rock bleed.
+  - **Recessed Cavern Backwall (`depth -0.5`)**: Fills corridor between ceiling and floor with an ambient grotto tone modulated by sub-bass acoustic pressure. Tightly anchored soft elliptical flashlight reflection spots track directly at diver torch heads (`spotX = px + 40`, `torchY = py - 2`), eliminating steep-slope detachment, rock bleed, and forward phantom runaway.
   - **Opaque Solid Rock Mask (`depth 0.0`)**: Solid void `#000206` fill extending outward from cave ceiling and floor boundaries, physically occluding all background layers outside the corridor and preserving crisp, high-contrast neon boundary strokes.
   - **Near-Field Foreground Rock Silhouettes (`depth 22`)**: Procedural dark jagged stalactites and arches scrolling at $1.35\times$ camera speed across extreme foreground, occluding diver and buddy for a visual parallax sandwich.
   - **Z-Perspective Marine Snow**: Motes assigned perspective depth $z \in [0.35, 2.0]$, scaling drift velocity and particle radius by $1/z$, with dual-depth rendering ($z < 0.85$ rendered at `depth 15` as near-field bokeh orbs in front of diver, $z \ge 0.85$ at `depth -1.5` behind diver).
