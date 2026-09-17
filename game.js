@@ -289,9 +289,12 @@ class ScubaFlowScene extends Phaser.Scene {
                 }
 
                 if (this.isPaused) {
-                    if (e.key === 'r' || e.key === 'R' || e.key === 'p' || e.key === 'P' || e.key === 'Escape') {
+                    if (e.key === 'p' || e.key === 'P' || e.key === 'Escape') {
                         e.preventDefault();
                         this.resumeDive();
+                    } else if (e.key === 'r' || e.key === 'R') {
+                        e.preventDefault();
+                        this.restartDive();
                     } else if (e.key === 'x' || e.key === 'X') {
                         e.preventDefault();
                         this.exitToTrackSelect();

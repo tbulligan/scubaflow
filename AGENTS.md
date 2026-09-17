@@ -76,7 +76,8 @@ For ScubaFlow:
   - **Mobile Touch Isolation (`isInteractiveUI` & `bindFastTap`):** Prevents window-wide touch breathing listeners (`preventDefault()`) from blocking dock and modal button taps. `bindFastTap` triggers instantly on touch without 300ms mobile delay.
 - **Pause & Resume Lifecycle:**
   - `togglePause()` / `pauseDive()` suspends Web Audio clock (`audioContext.suspend()`), pauses update loop, renders glass pause modal displaying current score, multiplier, and elapsed time.
-  - `resumeDive()` resumes Web Audio (`audioContext.resume()`) and hides modal (`Esc` / `P` / `R` keys).
+  - `resumeDive()` resumes Web Audio (`audioContext.resume()`) and hides modal (`Esc` / `P` keys).
+  - `restartDive()` restarts dive from beginning (`R` key).
   - `exitToTrackSelect()` exits to track selection menu (`X` key).
 - **Quick Restart Lifecycle (`restartDive()` / `R` key during dive):**
   - Instant in-place restart without browser page reload. Stops active buffer sources, kills tweens, clears results card, resets player/buddy/collectibles/scores, and restarts countdown sequence with cached audio buffer.
