@@ -4057,7 +4057,7 @@ function startGame() {
         backgroundColor: '#010410',
         scale: {
             mode: Phaser.Scale.FIT,
-            autoCenter: Phaser.Scale.CENTER_BOTH
+            autoCenter: Phaser.Scale.NO_CENTER
         },
         audio: {
             noAudio: true
