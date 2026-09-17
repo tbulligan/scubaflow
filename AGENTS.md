@@ -164,8 +164,8 @@ Multiplier $\ge \times 10$:
 - **Translucent Scuba Bubbles & Specular Sheen**: Dedicated procedural bubble texture featuring spherical glass membrane, internal refraction, and dual specular light highlights for breathing exhales and ambient floating bubbles.
 - **Luminous Lamp Lens Halos**: Player and buddy dive lamps emit radiant multi-ring halogen bulb blooms at beam origins with smooth optical falloff.
 - **2.5D Multi-Plane Cavern Depth & Parallax Sandwich**:
-  - **Recessed Cavern Backwall (`depth -0.5`)**: Fills corridor between ceiling and floor with an ambient dark cavern tone and vertical cylindrical curvature sonar ribs bowed into screen depth, transforming flat 2D lines into a hollow tube.
-  - **3D Rock Shelf & Bevel Extrusion**: Floor and ceiling feature shaded ledges with depth highlights along top rims and ambient occlusion shadow bands, giving rock faces physical thickness.
+  - **Recessed Cavern Backwall (`depth -0.5`)**: Fills corridor between ceiling and floor with an ambient grotto tone and corridor-clamped soft elliptical flashlight reflection spots tracking both player and buddy dive lamps across the rear wall without rock bleed.
+  - **Opaque Solid Rock Mask (`depth 0.0`)**: Solid void `#000206` fill extending outward from cave ceiling and floor boundaries, physically occluding all background layers outside the corridor and preserving crisp, high-contrast neon boundary strokes.
   - **Near-Field Foreground Rock Silhouettes (`depth 22`)**: Procedural dark jagged stalactites and arches scrolling at $1.35\times$ camera speed across extreme foreground, occluding diver and buddy for a visual parallax sandwich.
   - **Z-Perspective Marine Snow**: Motes assigned perspective depth $z \in [0.35, 2.0]$, scaling drift velocity and particle radius by $1/z$, with dual-depth rendering ($z < 0.85$ rendered at `depth 15` as near-field bokeh orbs in front of diver, $z \ge 0.85$ at `depth -1.5` behind diver).
 

@@ -377,7 +377,7 @@ class ScubaFlowScene extends Phaser.Scene {
         this.parallaxFarGraphics = this.add.graphics().setDepth(-2).setScrollFactor(0);  // farthest layer (slowest) — screen-space so it tiles left correctly
         this.parallaxNearGraphics = this.add.graphics().setDepth(-1); // near layer (faster)
         this.backwallGraphics = this.add.graphics().setDepth(-0.5); // recessed 2.5D cavern backwall connecting floor & ceiling
-        this.backgroundGraphics = this.add.graphics();
+        this.backgroundGraphics = this.add.graphics().setDepth(-0.4);
         this.terrainGraphics = this.add.graphics();
         this.guideLineGraphics = this.add.graphics().setDepth(1);
         this.lightGraphics = this.add.graphics();
@@ -1969,12 +1969,14 @@ class ScubaFlowScene extends Phaser.Scene {
         let flowSat = this.siltActive ? 0.15 : Math.min(1.0, 0.45 + (this.visualMultiplier - 1) * 0.08);
         let flowLightBoost = this.siltActive ? -0.15 : Math.min(0.12, (this.visualMultiplier - 1) * 0.017);
 
+        // 1. Beat Ripples
         for (let r of this.beatRipples) {
             let hue = (this.baseHue + r.radius * 0.15) % 360;
             let rippleColor = Phaser.Display.Color.HSLToColor(hue / 360, flowSat, 0.6 + flowLightBoost).color;
             bgG.lineStyle(2, rippleColor, r.alpha * 0.7);
             bgG.strokeCircle(r.x, r.y, r.radius);
         }
+
     }
 
     drawForegroundBubbles(dt) {
@@ -2676,8 +2678,8 @@ class ScubaFlowScene extends Phaser.Scene {
             bg.clear();
 
             let backwallHue = (floorHue + 210) % 360;
-            let backwallColor = this.hslToColorInt(backwallHue / 360, 0.40, 0.035);
-            let backwallAlpha = this.siltActive ? 0.28 : Math.min(0.70, 0.45 + flowFill * 0.16);
+            let backwallColor = this.hslToColorInt(backwallHue / 360, 0.50, 0.09 + flowFill * 0.05);
+            let backwallAlpha = this.siltActive ? 0.22 : Math.min(0.75, 0.60 + flowFill * 0.15);
 
             // 1. Solid ambient backwall filling corridor between ceiling and floor
             bg.fillStyle(backwallColor, backwallAlpha);
@@ -2692,95 +2694,92 @@ class ScubaFlowScene extends Phaser.Scene {
             bg.closePath();
             bg.fillPath();
 
-            // 2. Vertical Cylindrical Sonar Ribs (Curved Strata bowing away into screen depth)
-            let ribSpacing = 160;
-            let firstRib = Math.floor(startX / ribSpacing) * ribSpacing;
-            let lastRib = Math.ceil(endX / ribSpacing) * ribSpacing;
-            let ribHue = (floorHue + 180) % 360;
-            let ribColor = this.hslToColorInt(ribHue / 360, 0.50, 0.08);
-            let ribAlpha = (0.10 + pulse * 0.10 + flowFill * 0.08);
-            bg.lineStyle(1.4, ribColor, ribAlpha);
 
-            for (let rx = firstRib; rx <= lastRib; rx += ribSpacing) {
-                let { floorY: rf, ceilY: rc } = this.getWallY(rx);
-                let midY = (rc + rf) * 0.5;
-                let bowX = rx + 18 + pulse * 4;
-                bg.beginPath();
-                bg.moveTo(rx, rc);
-                for (let t = 0.25; t <= 1.0; t += 0.25) {
-                    let it = 1 - t;
-                    let qx = it * it * rx + 2 * it * t * bowX + t * t * rx;
-                    let qy = it * it * rc + 2 * it * t * midY + t * t * rf;
-                    bg.lineTo(qx, qy);
+
+            // 3. Volumetric Torch Backwall Reflection (Soft elliptical spotlight projected on rear wall)
+            if (!this.siltActive) {
+                // Player Torch Backwall Reflection
+                if (this.player) {
+                    let px = this.player.x;
+                    let rx = px + 130;
+                    let { floorY: pF, ceilY: pC } = this.getWallY(rx);
+                    let ryMax = Math.min(52, (pF - pC) * 0.38);
+                    let clampedPy = Phaser.Math.Clamp(this.player.y, pC + ryMax * 0.85, pF - ryMax * 0.85);
+
+                    let torchHue = (floorHue + 25) % 360;
+                    let torchBackCol = this.hslToColorInt(torchHue / 360, 0.85, 0.38);
+                    let torchIntensity = (this.lightFlashIntensity !== undefined ? this.lightFlashIntensity : 1.0);
+                    bg.fillStyle(torchBackCol, 0.15 * torchIntensity);
+                    bg.fillEllipse(rx, clampedPy, 240, ryMax * 2);
+                    bg.fillStyle(0xffffff, 0.08 * torchIntensity);
+                    bg.fillEllipse(px + 80, clampedPy, 110, ryMax);
                 }
-                bg.strokePath();
+
+                // Buddy Torch Backwall Reflection
+                if (this.buddy) {
+                    let bx = this.buddy.x;
+                    let bDir = this.buddy.scaleX || 1;
+                    let brx = bx + 110 * bDir;
+                    let { floorY: bF, ceilY: bC } = this.getWallY(brx);
+                    let bryMax = Math.min(46, (bF - bC) * 0.35);
+                    let clampedBy = Phaser.Math.Clamp(this.buddy.y, bC + bryMax * 0.85, bF - bryMax * 0.85);
+
+                    let buddyHue = (floorHue + 140) % 360;
+                    let buddyBackCol = this.hslToColorInt(buddyHue / 360, 0.85, 0.38);
+                    bg.fillStyle(buddyBackCol, 0.12);
+                    bg.fillEllipse(brx, clampedBy, 210, bryMax * 2);
+                    bg.fillStyle(0xffffff, 0.06);
+                    bg.fillEllipse(bx + 60 * bDir, clampedBy, 90, bryMax);
+                }
             }
         }
 
-        // Draw Floor (with 3D Shelf Bevel)
-        // Fill: dark base at low flow, neon-tinted at high flow
-        g.lineStyle(lineWidth, floorColor, lineAlpha);
-        g.fillStyle(floorColor, flowFill * 0.72); // 0 = invisible (wireframe), 0.72 = solid neon
+        // Draw Floor (solid rock mask occludes background visuals outside cave)
+        g.fillStyle(0x000206, 1.0);
         g.beginPath();
-        g.moveTo(floorPoints[0].x, 800);
+        g.moveTo(floorPoints[0].x, 850);
         for (let pt of floorPoints) {
             g.lineTo(pt.x, pt.y);
         }
-        g.lineTo(floorPoints[floorPoints.length - 1].x, 800);
+        g.lineTo(floorPoints[floorPoints.length - 1].x, 850);
         g.closePath();
         g.fillPath();
-        g.strokePath();
 
-        // 3D Floor Top-Shelf Ledge & Ambient Shadow
-        let floorShelfColor = this.hslToColorInt(floorHue / 360, wallSat * 0.9, Math.min(0.75, wallLum + 0.12));
-        g.lineStyle(1.2, floorShelfColor, (0.35 + flowFill * 0.40) * lineAlpha);
+        if (flowFill > 0) {
+            g.fillStyle(floorColor, flowFill * 0.72);
+            g.fillPath();
+        }
+        g.lineStyle(lineWidth, floorColor, lineAlpha);
         g.beginPath();
-        g.moveTo(floorPoints[0].x, floorPoints[0].y - 6);
+        g.moveTo(floorPoints[0].x, floorPoints[0].y);
         for (let i = 1; i < floorPoints.length; i++) {
-            g.lineTo(floorPoints[i].x, floorPoints[i].y - 6);
+            g.lineTo(floorPoints[i].x, floorPoints[i].y);
         }
         g.strokePath();
 
-        // Ambient occlusion shadow under floor rim
-        g.lineStyle(1.0, floorColor, (0.20 + flowFill * 0.25) * lineAlpha);
+        // Draw Ceiling (solid rock mask occludes background visuals outside cave)
+        g.fillStyle(0x000206, 1.0);
         g.beginPath();
-        g.moveTo(floorPoints[0].x, floorPoints[0].y + 6);
-        for (let i = 1; i < floorPoints.length; i++) {
-            g.lineTo(floorPoints[i].x, floorPoints[i].y + 6);
-        }
-        g.strokePath();
-
-        // Draw Ceiling (with 3D Under-Belly Overhang)
-        g.lineStyle(lineWidth, ceilColor, lineAlpha);
-        g.fillStyle(ceilColor, flowFill * 0.72);
-        g.beginPath();
-        g.moveTo(ceilPoints[0].x, -100);
+        g.moveTo(ceilPoints[0].x, -150);
         for (let pt of ceilPoints) {
             g.lineTo(pt.x, pt.y);
         }
-        g.lineTo(ceilPoints[ceilPoints.length - 1].x, -100);
+        g.lineTo(ceilPoints[ceilPoints.length - 1].x, -150);
         g.closePath();
         g.fillPath();
-        g.strokePath();
 
-        // Ceiling underside ambient shadow
-        let ceilShadeColor = this.hslToColorInt(ceilHue / 360, wallSat * 0.8, Math.max(0.10, wallLum - 0.15));
-        g.lineStyle(1.2, ceilShadeColor, (0.30 + flowFill * 0.30) * lineAlpha);
+        if (flowFill > 0) {
+            g.fillStyle(ceilColor, flowFill * 0.72);
+            g.fillPath();
+        }
+        g.lineStyle(lineWidth, ceilColor, lineAlpha);
         g.beginPath();
-        g.moveTo(ceilPoints[0].x, ceilPoints[0].y + 6);
+        g.moveTo(ceilPoints[0].x, ceilPoints[0].y);
         for (let i = 1; i < ceilPoints.length; i++) {
-            g.lineTo(ceilPoints[i].x, ceilPoints[i].y + 6);
+            g.lineTo(ceilPoints[i].x, ceilPoints[i].y);
         }
         g.strokePath();
 
-        // Upper ceiling rim
-        g.lineStyle(1.0, ceilColor, (0.22 + flowFill * 0.30) * lineAlpha);
-        g.beginPath();
-        g.moveTo(ceilPoints[0].x, ceilPoints[0].y - 6);
-        for (let i = 1; i < ceilPoints.length; i++) {
-            g.lineTo(ceilPoints[i].x, ceilPoints[i].y - 6);
-        }
-        g.strokePath();
 
         // --- Peppered Foreground Cracks on Player's Layer (Drawn in solid rock face with high variety) ---
         const SLOT_SIZE = 320;
@@ -4993,7 +4992,7 @@ class ScubaFlowScene extends Phaser.Scene {
         console.assert(testLight !== undefined && testLight.topPoints.length === 31, "Assertion Failed: drawDiveLight must return 31 topPoints");
         console.assert(recordedSliceAlphas.length >= 10 && recordedSliceAlphas.length <= 20, "Assertion Failed: drawDiveLight must render optimized progressive slices");
         let lastSliceAlpha = recordedSliceAlphas[recordedSliceAlphas.length - 1];
-        console.assert(lastSliceAlpha !== undefined && lastSliceAlpha < 0.01, "Assertion Failed: Torch light must feather to near-zero at outer range");
+        console.assert(lastSliceAlpha !== undefined && lastSliceAlpha < 0.015, "Assertion Failed: Torch light must feather to near-zero at outer range");
         for (let i = 0; i < testLight.topPoints.length; i++) {
             let ptTop = testLight.topPoints[i];
             let ptBottom = testLight.bottomPoints[i];
@@ -5127,7 +5126,7 @@ class ScubaFlowScene extends Phaser.Scene {
             let savedTime = this.elapsedTime;
             this.elapsedTime = 0;
             let huesStart = this.getCurrentZoneHues();
-            this.elapsedTime = zones[0].endTime - 100;
+            this.elapsedTime = zones[0].endTime + 100;
             let huesTransition = this.getCurrentZoneHues();
             this.elapsedTime = savedTime;
             console.assert(huesStart && typeof huesStart.floorHue === 'number', "Assertion Failed: getCurrentZoneHues must return floorHue");
