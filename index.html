@@ -150,13 +150,31 @@
             border-radius: 24px;
             padding: 24px 30px;
             max-width: 600px;
-            max-height: 85vh;
-            width: 90%;
+            max-height: 88vh;
+            max-height: 88dvh;
+            width: 92%;
             text-align: center;
             box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5), inset 0 1px 1px rgba(255, 255, 255, 0.05);
             transform: scale(1);
             transition: transform 0.3s ease;
             overflow-y: auto;
+            overflow-x: hidden;
+            scrollbar-width: thin;
+            scrollbar-color: rgba(0, 240, 255, 0.35) transparent;
+        }
+
+        .glass-card::-webkit-scrollbar {
+            width: 5px;
+        }
+        .glass-card::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        .glass-card::-webkit-scrollbar-thumb {
+            background: rgba(0, 240, 255, 0.3);
+            border-radius: 6px;
+        }
+        .glass-card::-webkit-scrollbar-thumb:hover {
+            background: rgba(0, 240, 255, 0.7);
         }
 
         .glass-card:hover {
@@ -716,78 +734,175 @@
             transform: scale(1.02);
         }
 
-        @media (max-width: 640px) {
-            .glass-card {
-                padding: 18px 20px;
+        /* Responsive Grid System for Cards (Intro & Results) */
+        .intro-card {
+            max-width: 780px;
+            width: min(780px, 94vw);
+            max-height: 90vh;
+            max-height: 90dvh;
+            padding: 22px 28px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .intro-header {
+            text-align: center;
+            flex-shrink: 0;
+        }
+
+        .intro-header h1 {
+            font-size: clamp(1.6rem, 3.8vw, 2.3rem);
+            margin-bottom: 2px;
+        }
+
+        .intro-header .subtitle {
+            margin-bottom: 8px;
+            font-size: clamp(0.72rem, 1.8vw, 0.85rem);
+        }
+
+        .intro-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 18px;
+            align-items: stretch;
+            text-align: left;
+        }
+
+        .intro-col-left, .intro-col-right {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .intro-col-right .btn-dive {
+            width: 100%;
+            margin-top: 2px;
+        }
+
+        .intro-col-right .menu-links {
+            margin-top: auto;
+            padding-top: 2px;
+        }
+
+        /* Results Card Responsive Inner */
+        .results-card-inner {
+            max-width: min(760px, 94vw);
+            max-height: 90vh;
+            max-height: 90dvh;
+            padding: 20px 24px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .results-grid {
+            display: grid;
+            grid-template-columns: 1.1fr 0.9fr;
+            gap: 16px;
+            align-items: center;
+            text-align: left;
+        }
+
+        .results-col-stats, .results-col-actions {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        /* Portrait & Narrow Viewports */
+        @media (max-width: 680px), (max-aspect-ratio: 1/1) {
+            .glass-card, .intro-card, .results-card-inner {
+                max-width: 480px;
+                padding: 16px 16px;
                 width: 94%;
                 border-radius: 18px;
+                max-height: 94vh;
+                max-height: 94dvh;
             }
-            h1 {
-                font-size: 1.8rem;
-            }
-            .subtitle {
-                font-size: 0.72rem;
-                margin-bottom: 12px;
+            .intro-grid, .results-grid {
+                grid-template-columns: 1fr;
+                gap: 10px;
             }
             .instructions-minimal {
-                font-size: 0.8rem;
-                margin-bottom: 12px;
                 padding: 10px 12px;
+                font-size: 0.78rem;
             }
             .uploader-container {
-                margin-bottom: 12px;
-            }
-            .file-label {
-                padding: 14px;
+                margin-bottom: 8px;
             }
             .switch-container {
-                margin-bottom: 18px;
-                padding: 10px 14px;
+                margin-bottom: 6px;
             }
             .btn-dive {
-                padding: 12px 20px;
-                font-size: 0.95rem;
+                padding: 11px 20px;
+                font-size: 0.92rem;
             }
         }
 
-        @media (max-height: 520px) and (orientation: landscape) {
-            .glass-card {
-                padding: 12px 18px;
-                max-height: 94vh;
+        /* Landscape Mobile & Low-Height Screens */
+        @media (max-height: 560px) and (orientation: landscape) {
+            .glass-card, .intro-card, .results-card-inner {
+                padding: 10px 18px;
+                max-height: 96vh;
+                max-height: 96dvh;
+                gap: 6px;
             }
-            h1 {
-                font-size: 1.4rem;
-                margin-bottom: 2px;
+            .intro-header h1 {
+                font-size: 1.35rem;
+                margin-bottom: 0px;
             }
-            .subtitle {
-                margin-bottom: 6px;
-                font-size: 0.7rem;
-            }
-            .instructions-minimal {
-                margin-bottom: 8px;
-                padding: 6px 10px;
-                font-size: 0.75rem;
-            }
-            .uploader-container {
-                margin-bottom: 8px;
-            }
-            .file-label {
-                padding: 8px;
-            }
-            .upload-icon {
-                font-size: 1.3rem;
+            .intro-header .subtitle {
+                font-size: 0.65rem;
                 margin-bottom: 4px;
             }
+            .intro-grid, .results-grid {
+                gap: 12px;
+            }
+            .instructions-minimal {
+                padding: 6px 10px;
+                font-size: 0.7rem;
+                line-height: 1.25;
+                margin-bottom: 0;
+            }
+            .instructions-minimal p {
+                margin-bottom: 3px;
+            }
+            .uploader-container {
+                margin-bottom: 0;
+            }
+            .file-label {
+                padding: 6px 10px;
+            }
+            .upload-icon {
+                font-size: 1.1rem;
+                margin-bottom: 2px;
+            }
+            .upload-title {
+                font-size: 0.8rem;
+                margin-bottom: 1px;
+            }
+            .upload-subtitle {
+                font-size: 0.62rem;
+            }
             .switch-container {
-                margin-bottom: 10px;
-                padding: 6px 12px;
+                padding: 5px 8px;
+                margin-bottom: 0;
+            }
+            .switch-label {
+                font-size: 0.72rem;
+            }
+            .switch-hint {
+                font-size: 0.6rem;
+                margin-top: 1px;
             }
             .btn-dive {
-                padding: 8px 16px;
-                font-size: 0.85rem;
+                padding: 7px 14px;
+                font-size: 0.82rem;
             }
             .menu-links {
-                margin-top: 6px;
+                font-size: 0.65rem;
+                margin-top: 2px;
             }
         }
     </style>
@@ -846,45 +961,53 @@
 
         <!-- Interactive Start Overlay -->
         <div id="intro-screen">
-            <div class="glass-card">
-                <h1 class="glow-title">ScubaFlow</h1>
-                <div class="subtitle">Neon Buoyancy Music Game</div>
+            <div class="glass-card intro-card">
+                <header class="intro-header">
+                    <h1 class="glow-title">ScubaFlow</h1>
+                    <div class="subtitle">Neon Buoyancy Music Game</div>
+                </header>
                 
-                <div class="instructions-minimal">
-                    <p>⌨️ Hold <strong>Spacebar</strong> or <strong>Tap &amp; Hold Screen</strong> to float, release to sink.</p>
-                    <p>💎 Collect neon debris, avoid the walls, and flow with the music.</p>
-                    <p class="key-hints">🎮 <strong>F</strong> Fullscreen &bull; <strong>P</strong> / <strong>Esc</strong> Pause &bull; <strong>R</strong> Restart</p>
-                </div>
-
-                <div class="uploader-container">
-                    <label for="audio-file-input" class="file-label" id="file-label-container">
-                        <div class="upload-icon">🎧</div>
-                        <div class="upload-title" id="file-label-text">Select Music Track to Dive</div>
-                        <div class="upload-subtitle">Supports .mp3, .wav, .ogg (click or drag &amp; drop)</div>
-                    </label>
-                    <input type="file" id="audio-file-input" accept="audio/*" style="display:none;">
-                </div>
-                
-                <!-- Autopilot / Music Visualizer Switch -->
-                <div class="switch-container">
-                    <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px;">
-                        <span class="switch-label" id="autopilot-label">Autopilot (Music Visualizer Mode)</span>
-                        <label class="toggle-switch" aria-labelledby="autopilot-label">
-                            <input type="checkbox" id="autopilot-checkbox">
-                            <span class="slider"></span>
-                        </label>
+                <div class="intro-grid">
+                    <div class="intro-col-left">
+                        <div class="instructions-minimal">
+                            <p>⌨️ Hold <strong>Spacebar</strong> or <strong>Tap Screen</strong> to float, release to sink.</p>
+                            <p>💎 Collect neon debris, dodge cavern walls, flow with music.</p>
+                            <p class="key-hints">🎮 <strong>F</strong> Fullscreen &bull; <strong>P</strong> / <strong>Esc</strong> Pause</p>
+                        </div>
+                        
+                        <!-- Autopilot / Music Visualizer Switch -->
+                        <div class="switch-container">
+                            <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px;">
+                                <span class="switch-label" id="autopilot-label">Autopilot (Visualizer Mode)</span>
+                                <label class="toggle-switch" aria-labelledby="autopilot-label">
+                                    <input type="checkbox" id="autopilot-checkbox">
+                                    <span class="slider"></span>
+                                </label>
+                            </div>
+                            <div class="switch-hint">
+                                Mutes game sounds to focus purely on your music track
+                            </div>
+                        </div>
                     </div>
-                    <div class="switch-hint">
-                        Mutes game sounds to focus purely on your music track
+
+                    <div class="intro-col-right">
+                        <div class="uploader-container">
+                            <label for="audio-file-input" class="file-label" id="file-label-container">
+                                <div class="upload-icon">🎧</div>
+                                <div class="upload-title" id="file-label-text">Select Music Track to Dive</div>
+                                <div class="upload-subtitle">Supports .mp3, .wav, .ogg (click or drop)</div>
+                            </label>
+                            <input type="file" id="audio-file-input" accept="audio/*" style="display:none;">
+                        </div>
+
+                        <button id="btn-dive" class="btn-dive" type="button" disabled style="opacity: 0.5; pointer-events: none;">Select a Music Track</button>
+
+                        <div class="menu-links">
+                            <a href="https://tomaso.bulligan.com/#contact" target="_blank" rel="noopener noreferrer" class="menu-link">Contact</a>
+                            <span class="menu-divider">|</span>
+                            <a href="https://github.com/tbulligan/scubaflow" target="_blank" rel="noopener noreferrer" class="menu-link">GitHub</a>
+                        </div>
                     </div>
-                </div>
-
-                <button id="btn-dive" class="btn-dive" type="button" disabled style="opacity: 0.5; pointer-events: none;">Select a Music Track</button>
-
-                <div class="menu-links">
-                    <a href="https://tomaso.bulligan.com/#contact" target="_blank" rel="noopener noreferrer" class="menu-link">Contact</a>
-                    <span class="menu-divider">|</span>
-                    <a href="https://github.com/tbulligan/scubaflow" target="_blank" rel="noopener noreferrer" class="menu-link">GitHub</a>
                 </div>
             </div>
         </div>
@@ -1021,6 +1144,7 @@
             btn.addEventListener('touchstart', handler, { passive: false });
             btn.addEventListener('click', handler);
         };
+        window.bindFastTap = bindFastTap;
 
         const fsBtn = document.getElementById('btn-fullscreen');
         if (fsBtn) {
@@ -1078,24 +1202,31 @@
             }
         });
 
-        // Wire-up page start overlay trigger
-        document.getElementById('btn-dive').addEventListener('click', () => {
+        // Wire-up page start overlay trigger with fast tap & mobile gesture handling
+        bindFastTap(document.getElementById('btn-dive'), () => {
+            let diveBtn = document.getElementById('btn-dive');
+            if (diveBtn && (diveBtn.disabled || diveBtn.getAttribute('disabled') !== null)) return;
+
             // Auto-fullscreen & landscape lock for mobile on dive start (SOTA user gesture integration)
-            if (('ontouchstart' in window || navigator.maxTouchPoints > 0) && window.innerWidth <= 1024) {
-                let elem = document.documentElement;
-                let reqFs = elem.requestFullscreen || elem.webkitRequestFullscreen || elem.mozRequestFullScreen || elem.msRequestFullscreen;
-                if (reqFs) {
-                    let p = reqFs.call(elem);
-                    if (p && p.then) {
-                        p.then(() => {
-                            if (screen.orientation && screen.orientation.lock) {
-                                screen.orientation.lock('landscape').catch(() => {});
-                            }
-                        }).catch(() => {});
-                    } else if (screen.orientation && screen.orientation.lock) {
-                        screen.orientation.lock('landscape').catch(() => {});
+            try {
+                if (('ontouchstart' in window || navigator.maxTouchPoints > 0) && window.innerWidth <= 1024) {
+                    let elem = document.documentElement;
+                    let reqFs = elem.requestFullscreen || elem.webkitRequestFullscreen || elem.mozRequestFullScreen || elem.msRequestFullscreen;
+                    if (reqFs) {
+                        let p = reqFs.call(elem);
+                        if (p && p.then) {
+                            p.then(() => {
+                                if (screen.orientation && screen.orientation.lock) {
+                                    screen.orientation.lock('landscape').catch(() => {});
+                                }
+                            }).catch(() => {});
+                        } else if (screen.orientation && screen.orientation.lock) {
+                            screen.orientation.lock('landscape').catch(() => {});
+                        }
                     }
                 }
+            } catch (fsErr) {
+                console.warn("Fullscreen/orientation request ignored:", fsErr);
             }
 
             // Create and resume AudioContext inside the user gesture stack to prevent decode hangs
@@ -1110,9 +1241,9 @@
             }
 
             let overlay = document.getElementById('intro-screen');
-            overlay.classList.add('descending');
+            if (overlay) overlay.classList.add('descending');
             setTimeout(() => {
-                overlay.style.display = 'none';
+                if (overlay) overlay.style.display = 'none';
                 if (pauseBtn) pauseBtn.style.display = 'flex';
                 startGame();
                 

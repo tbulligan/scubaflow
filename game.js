@@ -38,11 +38,12 @@ class PsychedelicFX extends Phaser.Renderer.WebGL.Pipelines.PostFXPipeline {
                     float caustic = pow(clamp(0.5 + 0.5 * sin(p2 * 2.5), 0.0, 1.0), 4.0);
                     vec3 causticCol = vec3(0.0, 0.94, 1.0) * (caustic * uCausticIntensity);
 
-                    // 4. Subtle cinematic edge vignette (deep-sea abyss falloff)
+                    // 4. Subtle cinematic edge vignette & deep-sea volumetric depth haze
                     vec2 vigCoord = (uv - 0.5) * vec2(1.25, 1.0);
                     float vig = clamp(1.0 - dot(vigCoord, vigCoord) * 0.38, 0.0, 1.0);
+                    vec3 hazeCol = vec3(0.002, 0.012, 0.026) * (1.0 - vig);
 
-                    vec3 finalRGB = (vec3(r, g, b) + causticCol) * vig;
+                    vec3 finalRGB = (vec3(r, g, b) + causticCol) * vig + hazeCol;
 
                     gl_FragColor = vec4(finalRGB, a);
                 }
@@ -177,8 +178,6 @@ class ScubaFlowScene extends Phaser.Scene {
         // Point Arrays pre-allocation for zero GC churn
         this.floorPoints = [];
         this.ceilPoints = [];
-        this.farPoints = [];
-        this.nearPoints = [];
 
         this.playerCheckPoints = [
             { x: 0, y: 0, r: 6.5, floor: true, ceil: true },
@@ -217,9 +216,12 @@ class ScubaFlowScene extends Phaser.Scene {
                 { time: 30000, y: 450, energy: 0.5 },
                 { time: 120000, y: 250, energy: 0.3 }
             ],
-            collectibles: [],
             zones: [
-                { startTime: 0, endTime: 120000, targetDepth: 300, name: "Reef", floorColor: 0xbd00ff, ceilColor: 0x00f0ff, floorHue: 284, ceilHue: 184, bgColor: 0x010410 }
+                { startTime: 0, endTime: 24000, targetDepth: 250, name: "Neon Reef", floorColor: 0x00ff88, ceilColor: 0x00f0ff, floorHue: 152, ceilHue: 184, bgColor: 0x010c14 },
+                { startTime: 24000, endTime: 48000, targetDepth: 350, name: "Solar Ridge", floorColor: 0xffcc00, ceilColor: 0xff00b4, floorHue: 48, ceilHue: 318, bgColor: 0x0e0212 },
+                { startTime: 48000, endTime: 72000, targetDepth: 450, name: "Ultraviolet Cavern", floorColor: 0xff007f, ceilColor: 0x4b0082, floorHue: 330, ceilHue: 275, bgColor: 0x12010c },
+                { startTime: 72000, endTime: 96000, targetDepth: 500, name: "Molten Abyss", floorColor: 0xff6600, ceilColor: 0x9900ff, floorHue: 24, ceilHue: 276, bgColor: 0x120501 },
+                { startTime: 96000, endTime: 120000, targetDepth: 300, name: "Cyber Ascent", floorColor: 0x00ffff, ceilColor: 0x008080, floorHue: 180, ceilHue: 180, bgColor: 0x010d12 }
             ],
             beats: []
         };
@@ -276,36 +278,38 @@ class ScubaFlowScene extends Phaser.Scene {
                 this.screenTouchActive = false;
             });
 
-            window.addEventListener('touchstart', (e) => {
+            this.onTouchStart = (e) => {
                 if (isInteractiveUI(e.target)) return;
                 if (this.isPlaying && !this.useAutopilot && !this.isPaused) {
                     if (e.cancelable) e.preventDefault();
                     this.screenTouchActive = true;
                 }
-            }, { passive: false });
-
-            window.addEventListener('touchmove', (e) => {
+            };
+            this.onTouchMove = (e) => {
                 if (isInteractiveUI(e.target)) return;
                 if (this.isPlaying && !this.useAutopilot && !this.isPaused) {
                     if (e.cancelable) e.preventDefault();
                 }
-            }, { passive: false });
-
-            window.addEventListener('touchend', (e) => {
+            };
+            this.onTouchEnd = (e) => {
                 if (isInteractiveUI(e.target)) return;
                 this.screenTouchActive = false;
-            });
-
-            window.addEventListener('touchcancel', () => {
+            };
+            this.onTouchCancel = () => {
                 this.screenTouchActive = false;
-            });
-
-            window.addEventListener('contextmenu', (e) => {
+            };
+            this.onContextMenu = (e) => {
                 if (this.isPlaying) e.preventDefault();
-            });
+            };
 
-            // Zero-HUD Hotkeys: Pause (Esc/P), Resume (R), Exit (X)
-            window.addEventListener('keydown', (e) => {
+            window.addEventListener('touchstart', this.onTouchStart, { passive: false });
+            window.addEventListener('touchmove', this.onTouchMove, { passive: false });
+            window.addEventListener('touchend', this.onTouchEnd);
+            window.addEventListener('touchcancel', this.onTouchCancel);
+            window.addEventListener('contextmenu', this.onContextMenu);
+
+            // Zero-HUD Hotkeys: Pause (Esc/P), Resume (R), Exit (X in pause/results)
+            this.onKeyDown = (e) => {
                 if (!this.isPlaying && !this.isPaused && !this.isLevelCompleted) return;
 
                 if (this.isLevelCompleted) {
@@ -333,15 +337,13 @@ class ScubaFlowScene extends Phaser.Scene {
                     return;
                 }
 
-                // While playing (unpaused)
+                // While playing (unpaused): P/Esc to pause (R and X disabled to prevent accidental aborts)
                 if (e.key === 'p' || e.key === 'P' || e.key === 'Escape') {
                     e.preventDefault();
                     this.pauseDive();
-                } else if (e.key === 'r' || e.key === 'R') {
-                    e.preventDefault();
-                    this.restartDive();
                 }
-            });
+            };
+            window.addEventListener('keydown', this.onKeyDown);
         }
 
         window.activeScubaScene = this;
@@ -375,6 +377,7 @@ class ScubaFlowScene extends Phaser.Scene {
         this.parallaxNearGraphics = this.add.graphics().setDepth(-1); // near layer (faster)
         this.backgroundGraphics = this.add.graphics();
         this.terrainGraphics = this.add.graphics();
+        this.guideLineGraphics = this.add.graphics().setDepth(1);
         this.lightGraphics = this.add.graphics();
         this.lightGraphics.setDepth(5);
         this.siltOverlay = this.add.graphics();
@@ -526,6 +529,7 @@ class ScubaFlowScene extends Phaser.Scene {
                                 this.parallaxNearGraphics,
                                 this.backgroundGraphics,
                                 this.terrainGraphics,
+                                this.guideLineGraphics,
                                 this.lightGraphics,
                                 this.siltOverlay,
                                 this.siltVignetteImage,
@@ -603,6 +607,40 @@ class ScubaFlowScene extends Phaser.Scene {
                 statusText.setText('Audio Context Failed');
                 subText.setText(err.message);
             }
+        } else {
+            // Diegetic recovery if Begin Dive triggered without custom track
+            console.warn("No custom audio buffer found in window.customAudioBuffer. Returning to menu.");
+            let statusBg = this.add.graphics();
+            statusBg.fillStyle(0x000206, 1.0);
+            statusBg.fillRect(0, 0, 1200, 700);
+
+            let statusText = this.add.text(600, 330, 'NO TRACK LOADED', {
+                fontFamily: 'Outfit',
+                fontSize: '22px',
+                color: '#ff007f',
+                letterSpacing: 2,
+                fontStyle: 'bold'
+            }).setOrigin(0.5);
+
+            let subText = this.add.text(600, 375, 'Please select or drop a music track first.', {
+                fontFamily: 'Montserrat',
+                fontSize: '13px',
+                color: '#94a3b8'
+            }).setOrigin(0.5);
+
+            this.time.delayedCall(1200, () => {
+                let intro = document.getElementById('intro-screen');
+                let pauseBtn = document.getElementById('btn-pause');
+                if (pauseBtn) pauseBtn.style.display = 'none';
+                if (intro) {
+                    intro.classList.remove('descending');
+                    intro.style.display = 'flex';
+                }
+                if (window.game) {
+                    window.game.destroy(true);
+                    window.game = null;
+                }
+            });
         }
     }
 
@@ -611,88 +649,137 @@ class ScubaFlowScene extends Phaser.Scene {
         this.elapsedTime = 0;
         this.isPlaying = true; // allow update loop to render the starting scene
 
-        this.showTrackStartOverlay(() => {
-            // Diegetic Avatar Clarity: Show "YOU" and "FOLLOW ME 👌" during countdown
-            if (this.buddyBubble) {
-                this.buddyBubble.setText("FOLLOW ME 👌").setVisible(true).setPosition(this.buddy.x, this.buddy.y - 45);
-            }
-            if (this.playerBubble) {
-                this.playerBubble.setText("YOU 🫧").setVisible(true).setPosition(this.player.x, this.player.y - 45);
-            }
+        // Diegetic Avatar Clarity: Show "YOU" and "FOLLOW ME 👌" during countdown
+        if (this.buddyBubble) {
+            this.buddyBubble.setText("FOLLOW ME 👌").setVisible(true).setPosition(this.buddy.x, this.buddy.y - 45);
+        }
+        if (this.playerBubble) {
+            this.playerBubble.setText("YOU 🫧").setVisible(true).setPosition(this.player.x, this.player.y - 45);
+        }
 
-            let countdownNumbers = ['3', '2', '1', 'FLOW!'];
-            let colors = ['#bd00ff', '#00f0ff', '#ff007f', '#00ff66'];
-            let index = 0;
+        // Concurrent Track Info Overlay during 3s countdown (positioned at top-center away from divers)
+        let trackName = window.customTrackName || "Unknown Track";
+        let displayTitle = trackName.replace(/\.[^/.]+$/, '').toUpperCase();
+        if (displayTitle.length > 48) displayTitle = displayTitle.slice(0, 45) + '...';
 
-            let showNext = () => {
-                if (index < countdownNumbers.length) {
-                    let numStr = countdownNumbers[index];
-                    let colorHex = colors[index];
-                    this.countdownText.setText(numStr);
-                    this.countdownText.setColor(colorHex);
-                    this.countdownText.setShadow(0, 0, colorHex, 30, true, true);
-                    this.countdownText.setStroke(colorHex, 8);
-                    this.countdownText.setScale(0.3);
-                    this.countdownText.setAlpha(1);
+        let durationMs = this.levelData.songLengthMs || 0;
+        let minutes = Math.floor(durationMs / 60000);
+        let seconds = Math.floor((durationMs % 60000) / 1000);
+        let durationStr = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+        let currentZone = this.getCurrentDepthZone();
+        let colorStr = currentZone ? '#' + currentZone.ceilColor.toString(16).padStart(6, '0') : '#00f0ff';
 
-                    // Play tick beep using Web Audio API AudioContext directly
-                    try {
-                        let osc = ctx.createOscillator();
-                        let gainNode = ctx.createGain();
-                        osc.connect(gainNode);
-                        gainNode.connect(ctx.destination);
-                        osc.type = 'sine';
-                        if (numStr === 'FLOW!') {
-                            osc.frequency.setValueAtTime(440, ctx.currentTime);
-                            osc.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 0.25);
-                            gainNode.gain.setValueAtTime(0.15, ctx.currentTime);
-                            gainNode.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.4);
-                            osc.start();
-                            osc.stop(ctx.currentTime + 0.5);
-                        } else {
-                            osc.frequency.setValueAtTime(523.25, ctx.currentTime); // C5 note
-                            gainNode.gain.setValueAtTime(0.1, ctx.currentTime);
-                            gainNode.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.15);
-                            osc.start();
-                            osc.stop(ctx.currentTime + 0.2);
-                        }
-                    } catch (e) {
-                        console.warn("Failed to play countdown beep:", e);
-                    }
+        let infoText = this.add.text(600, 65, displayTitle, {
+            fontFamily: 'Outfit',
+            fontSize: '22px',
+            fontStyle: 'bold',
+            color: colorStr,
+            letterSpacing: 2,
+            align: 'center'
+        }).setOrigin(0.5).setDepth(100).setAlpha(0).setScrollFactor(0);
 
-                    let stepDuration = 600;
-                    this.tweens.add({
-                        targets: this.countdownText,
-                        scale: 1.5,
-                        alpha: { from: 1, to: 0 },
-                        duration: stepDuration,
-                        ease: 'Cubic.easeOut',
-                        onComplete: () => {
-                            index++;
-                            showNext();
-                        }
-                    });
-                } else {
-                    this.countdownText.destroy();
-                    this.countdownActive = false;
-                    if (this.buddyBubble) this.buddyBubble.setVisible(false);
-                    if (this.playerBubble) this.playerBubble.setVisible(false);
-                    console.log("Countdown complete. Starting setupAudioEngine...");
-                    this.setupAudioEngine(ctx);
-                    console.log("setupAudioEngine completed.");
-                }
-            };
+        let durationText = this.add.text(600, 98, durationStr, {
+            fontFamily: 'Outfit',
+            fontSize: '14px',
+            color: '#94a3b8',
+            letterSpacing: 1,
+            align: 'center'
+        }).setOrigin(0.5).setDepth(100).setAlpha(0).setScrollFactor(0);
 
-            this.countdownText = this.add.text(600, 350, '', {
-                fontFamily: 'Outfit',
-                fontSize: '140px',
-                fontStyle: 'bold'
-            }).setOrigin(0.5).setDepth(100).setScrollFactor(0);
+        this.startInfoText = infoText;
+        this.startDurationText = durationText;
+        this.cameras.main.ignore([infoText, durationText]);
 
-            this.cameras.main.ignore(this.countdownText);
-
-            showNext();
+        this.tweens.add({
+            targets: [infoText, durationText],
+            alpha: 1,
+            duration: 400,
+            ease: 'Power2'
         });
+
+        // 3-Second Unified Countdown: 4 ticks of 750ms = 3000ms
+        let countdownNumbers = ['3', '2', '1', 'FLOW!'];
+        let colors = ['#bd00ff', '#00f0ff', '#ff007f', '#00ff66'];
+        let index = 0;
+        let stepDuration = 750;
+
+        let showNext = () => {
+            if (!this.isPlaying || !this.countdownActive) return;
+            if (index < countdownNumbers.length) {
+                let numStr = countdownNumbers[index];
+                let colorHex = colors[index];
+                this.countdownText.setText(numStr);
+                this.countdownText.setColor(colorHex);
+                this.countdownText.setShadow(0, 0, colorHex, 30, true, true);
+                this.countdownText.setStroke(colorHex, 8);
+                this.countdownText.setScale(0.3);
+                this.countdownText.setAlpha(1);
+
+                // Play tick beep using Web Audio API AudioContext directly
+                try {
+                    let osc = ctx.createOscillator();
+                    let gainNode = ctx.createGain();
+                    osc.connect(gainNode);
+                    gainNode.connect(ctx.destination);
+                    osc.type = 'sine';
+                    if (numStr === 'FLOW!') {
+                        osc.frequency.setValueAtTime(440, ctx.currentTime);
+                        osc.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 0.25);
+                        gainNode.gain.setValueAtTime(0.15, ctx.currentTime);
+                        gainNode.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.4);
+                        osc.start();
+                        osc.stop(ctx.currentTime + 0.5);
+                    } else {
+                        osc.frequency.setValueAtTime(523.25, ctx.currentTime); // C5 note
+                        gainNode.gain.setValueAtTime(0.1, ctx.currentTime);
+                        gainNode.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.15);
+                        osc.start();
+                        osc.stop(ctx.currentTime + 0.2);
+                    }
+                } catch (e) {
+                    console.warn("Failed to play countdown beep:", e);
+                }
+
+                this.tweens.add({
+                    targets: this.countdownText,
+                    scale: 1.4,
+                    alpha: { from: 1, to: 0 },
+                    duration: stepDuration,
+                    ease: 'Cubic.easeOut',
+                    onComplete: () => {
+                        index++;
+                        showNext();
+                    }
+                });
+            } else {
+                if (!this.isPlaying || !this.countdownActive) return;
+                this.countdownText.destroy();
+                this.countdownActive = false;
+                if (this.startInfoText) {
+                    this.startInfoText.destroy();
+                    this.startInfoText = null;
+                }
+                if (this.startDurationText) {
+                    this.startDurationText.destroy();
+                    this.startDurationText = null;
+                }
+                if (this.buddyBubble) this.buddyBubble.setVisible(false);
+                if (this.playerBubble) this.playerBubble.setVisible(false);
+                console.log("Countdown complete. Starting setupAudioEngine...");
+                this.setupAudioEngine(ctx);
+                console.log("setupAudioEngine completed.");
+            }
+        };
+
+        this.countdownText = this.add.text(600, 420, '', {
+            fontFamily: 'Outfit',
+            fontSize: '140px',
+            fontStyle: 'bold'
+        }).setOrigin(0.5).setDepth(100).setScrollFactor(0);
+
+        this.cameras.main.ignore(this.countdownText);
+
+        showNext();
     }
 
     update(time, delta) {
@@ -839,6 +926,12 @@ class ScubaFlowScene extends Phaser.Scene {
 
             // Standard input & lung volume simulation (shared between manual & autopilot)
             let spaceDown = this.isBreathingIn();
+            if (spaceDown !== this.lastSpaceDown) {
+                this.lastSpaceDown = spaceDown;
+                if (typeof navigator !== 'undefined' && navigator.vibrate && !this.useAutopilot) {
+                    navigator.vibrate(12);
+                }
+            }
             let fillRate = 3.0;
             if (spaceDown) {
                 this.V_lung = Math.min(1.0, this.V_lung + fillRate * physDt);
@@ -1005,17 +1098,40 @@ class ScubaFlowScene extends Phaser.Scene {
             }
 
             // Find time since last beat for visual pulses
-            for (let b of beats) {
-                if (this.elapsedTime >= b) {
-                    lastBeatTime = b;
+            let lastBeatIdx = -1;
+            for (let i = 0; i < beats.length; i++) {
+                if (this.elapsedTime >= beats[i]) {
+                    lastBeatTime = beats[i];
+                    lastBeatIdx = i;
                 } else {
                     break;
                 }
             }
             let timeSinceBeat = this.elapsedTime - lastBeatTime;
             let pulse = 0;
-            if (timeSinceBeat >= 0 && timeSinceBeat < 300) {
-                pulse = 1.0 - (timeSinceBeat / 300);
+            if (timeSinceBeat >= 0) {
+                let beatInterval = 500;
+                if (lastBeatIdx >= 0 && lastBeatIdx < beats.length - 1) {
+                    beatInterval = beats[lastBeatIdx + 1] - beats[lastBeatIdx];
+                } else if (lastBeatIdx > 0) {
+                    beatInterval = beats[lastBeatIdx] - beats[lastBeatIdx - 1];
+                } else if (this.levelData && this.levelData.bpm) {
+                    beatInterval = (60 / this.levelData.bpm) * 1000;
+                }
+                beatInterval = Math.max(160, Math.min(1500, beatInterval));
+
+                let currentEnergy = this.getEnergyAtTime(this.elapsedTime);
+                // Pulse duration dynamically scales with music tempo and energy:
+                // Ambient/calm tracks breathe longer (up to 75% of interval); intense drops snap faster (55% of interval)
+                let decayRatio = 0.75 - currentEnergy * 0.20;
+                let pulseDuration = Math.min(800, Math.max(160, beatInterval * decayRatio));
+
+                if (timeSinceBeat < pulseDuration) {
+                    let progress = timeSinceBeat / pulseDuration;
+                    // Quadratic ease-out: punchy musical transient attack with smooth zero-velocity settling
+                    let p = 1.0 - progress;
+                    pulse = p * p;
+                }
             }
             this.currentBeatPulse = pulse;
 
@@ -1096,47 +1212,37 @@ class ScubaFlowScene extends Phaser.Scene {
                 }
             }
 
-            let targetBuddyX = this.player.x + 300;
-            if (this.buddyState === 'assisting' || this.buddyState === 'clearing' || this.buddyState === 'relieved') {
-                targetBuddyX = this.player.x + 90;
+            let isRescuing = this.buddyState === 'assisting' || this.buddyState === 'clearing' || this.buddyState === 'relieved';
+            let targetBuddyX = this.player.x + (isRescuing ? 90 : 280);
+            if (isRescuing) {
                 this.buddy.scaleX = -1; // Face player
             } else {
                 this.buddy.scaleX = 1;  // Face forward
             }
-            this.buddy.x = Phaser.Math.Linear(this.buddy.x, targetBuddyX, 1 - Math.exp(-2.0 * physDt));
+            this.buddy.x = Phaser.Math.Linear(this.buddy.x, targetBuddyX, 1 - Math.exp(-0.9 * physDt));
 
-            let buddyLeadTime = this.elapsedTime + (this.buddy.x - this.player.x) / this.baseScrollSpeed * 1000;
-            let buddyTargetY = this.getTargetYAtTime(buddyLeadTime);
-            this.buddy.y = Phaser.Math.Linear(this.buddy.y, buddyTargetY, 1 - Math.exp(-4 * physDt));
 
-            // Clamp buddy tightly to safety zone borders so buddy never touches wall or raises sediment
-            let scaleX = this.buddy.scaleX || 1;
-            let buddyPts = this.getBuddyCheckPoints(scaleX);
-            let minYAllowed = -9999;
-            let maxYAllowed = 9999;
-            let minYAbsolute = -9999;
-            let maxYAbsolute = 9999;
-            let safetyMargin = 15; // 15px safe buffer so buddy is completely clear of walls
-            let absoluteMargin = 2; // 2px absolute buffer to never touch terrain
+            // Natural scout drafting: buddy stays comfortably centered in the open corridor
+            let { floorY: bFloorY, ceilY: bCeilY } = this.getWallY(this.buddy.x);
+            let corridorCenterY = (bFloorY + bCeilY) * 0.5;
+            let corridorHalfHeight = (bFloorY - bCeilY) * 0.5;
 
-            for (let pt of buddyPts) {
-                let wx = this.buddy.x + pt.x;
-                let { floorY: ptFloorY, ceilY: ptCeilY } = this.getWallY(wx);
+            // Gentle, organic swimming sway (natural dive buddy buoyancy breathing drift)
+            let swimSway = Math.sin(this.elapsedTime * 0.0016 + 1.2) * Math.min(10, corridorHalfHeight * 0.2);
+            let targetBuddyY = corridorCenterY + swimSway;
 
-                minYAllowed = Math.max(minYAllowed, ptCeilY - pt.y + pt.r + safetyMargin);
-                maxYAllowed = Math.min(maxYAllowed, ptFloorY - pt.y - pt.r - safetyMargin);
-
-                minYAbsolute = Math.max(minYAbsolute, ptCeilY - pt.y + pt.r + absoluteMargin);
-                maxYAbsolute = Math.min(maxYAbsolute, ptFloorY - pt.y - pt.r - absoluteMargin);
-            }
-
-            if (minYAllowed <= maxYAllowed) {
-                this.buddy.y = Phaser.Math.Clamp(this.buddy.y, minYAllowed, maxYAllowed);
-            } else if (minYAbsolute <= maxYAbsolute) {
-                this.buddy.y = Phaser.Math.Clamp(this.buddy.y, minYAbsolute, maxYAbsolute);
+            // Generous safety buffer keeping buddy comfortably away from rocky ceiling and floor
+            let safeMargin = Math.min(32, Math.max(18, corridorHalfHeight - 20));
+            let minSafeY = bCeilY + safeMargin;
+            let maxSafeY = bFloorY - safeMargin;
+            if (minSafeY <= maxSafeY) {
+                targetBuddyY = Phaser.Math.Clamp(targetBuddyY, minSafeY, maxSafeY);
             } else {
-                this.buddy.y = (minYAbsolute + maxYAbsolute) / 2;
+                targetBuddyY = corridorCenterY;
             }
+
+            // Smooth fluid exponential glide (zero high-frequency jitter, zero harsh snapping)
+            this.buddy.y = Phaser.Math.Linear(this.buddy.y, targetBuddyY, 1 - Math.exp(-2.2 * physDt));
 
             // 8. Silt Recovery timer & Scroll Speed Slowdown
             if (this.siltActive) {
@@ -1378,7 +1484,7 @@ class ScubaFlowScene extends Phaser.Scene {
         this.bubbleEmitter = this.add.particles(0, 0, 'scuba_bubble', {
             lifespan: 1800,
             speedY: { min: -120, max: -40 },
-            speedX: { min: -15, max: 20 },
+            speedX: { min: -45, max: -15 },
             scale: { start: 0.35, end: 1.1 },
             alpha: { start: 0.85, end: 0 },
             frequency: -1,
@@ -2176,6 +2282,8 @@ class ScubaFlowScene extends Phaser.Scene {
         let bDir = this.buddy.scaleX; // 1 or -1
         let bHandX = this.buddy.x + 26 * bDir;
         let bHandY = this.buddy.y - 2;
+
+        this.buddy.rotation = 0;
         this.buddyBeam = this.drawDiveLight(g, bHandX, bHandY, bDir, 0xffffff, bAccent, bHue, false);
     }
 
@@ -2184,14 +2292,14 @@ class ScubaFlowScene extends Phaser.Scene {
         let beamSpread = 75;
         let steps = 30;
 
-        let intensity = this.lightFlashIntensity !== undefined ? this.lightFlashIntensity : 1.0;
+        let intensity = isPlayer ? (this.lightFlashIntensity !== undefined ? this.lightFlashIntensity : 1.0) : 1.0;
         beamLength *= intensity;
         beamSpread *= intensity;
 
         let stepX = (beamLength / steps) * dir;
 
-        let flowSat = this.siltActive ? 0.15 : Math.min(1.0, 0.45 + (this.visualMultiplier - 1) * 0.08);
-        let flowLightBoost = this.siltActive ? -0.15 : Math.min(0.12, (this.visualMultiplier - 1) * 0.017);
+        let flowSat = (isPlayer && this.siltActive) ? 0.15 : Math.min(1.0, 0.45 + (this.visualMultiplier - 1) * 0.08);
+        let flowLightBoost = (isPlayer && this.siltActive) ? -0.15 : Math.min(0.12, (this.visualMultiplier - 1) * 0.017);
 
         let lightCol = this.hslToColorInt(hueVal, flowSat, 0.65 + flowLightBoost);
 
@@ -2205,7 +2313,7 @@ class ScubaFlowScene extends Phaser.Scene {
             let x = x0 + i * stepX;
             let ratio = i / steps;
 
-            // Unconstrained beam Y
+            // Unconstrained beam Y (horizontal trim)
             let yTop = y0 - ratio * beamSpread;
             let yBottom = y0 + ratio * beamSpread;
 
@@ -2250,35 +2358,45 @@ class ScubaFlowScene extends Phaser.Scene {
             bottomPoints.push({ x: x, y: cBottom });
         }
 
-        // Draw main beam
-        g.fillStyle(lightCol, (0.16 + (this.visualMultiplier - 1) * 0.02) * intensity);
-        g.beginPath();
-        g.moveTo(x0, y0);
-        for (let pt of topPoints) {
-            g.lineTo(pt.x, pt.y);
-        }
-        for (let i = bottomPoints.length - 1; i >= 0; i--) {
-            g.lineTo(bottomPoints[i].x, bottomPoints[i].y);
-        }
-        g.closePath();
-        g.fillPath();
+        // Draw beam as layered sub-polygons for smooth alpha fadeout at tip
+        // Each layer covers origin → cutoff%, with alpha decreasing per layer
+        let baseMainAlpha = (0.16 + (this.visualMultiplier - 1) * 0.02) * intensity;
+        let baseCoreAlpha = (0.08 + (this.visualMultiplier - 1) * 0.01) * intensity;
+        let fadeSlices = [
+            { cutoff: 1.00, mainMul: 0.25, coreMul: 0.20 },
+            { cutoff: 0.75, mainMul: 0.30, coreMul: 0.25 },
+            { cutoff: 0.50, mainMul: 0.55, coreMul: 0.45 },
+            { cutoff: 0.25, mainMul: 0.75, coreMul: 0.65 },
+        ];
 
-        // Draw inner bright core beam
-        g.fillStyle(0xffffff, (0.08 + (this.visualMultiplier - 1) * 0.01) * intensity);
-        g.beginPath();
-        g.moveTo(x0, y0);
-        for (let i = 0; i <= steps; i++) {
-            let ptTop = topPoints[i];
-            let coreTop = ptTop.y * 0.45 + y0 * 0.55;
-            g.lineTo(ptTop.x, coreTop);
+        for (let s = 0; s < fadeSlices.length; s++) {
+            let slice = fadeSlices[s];
+            let lastStep = Math.floor(slice.cutoff * steps);
+
+            // Main beam slice
+            g.fillStyle(lightCol, baseMainAlpha * slice.mainMul);
+            g.beginPath();
+            g.moveTo(x0, y0);
+            for (let i = 0; i <= lastStep; i++) g.lineTo(topPoints[i].x, topPoints[i].y);
+            for (let i = lastStep; i >= 0; i--) g.lineTo(bottomPoints[i].x, bottomPoints[i].y);
+            g.closePath();
+            g.fillPath();
+
+            // Core beam slice
+            g.fillStyle(0xffffff, baseCoreAlpha * slice.coreMul);
+            g.beginPath();
+            g.moveTo(x0, y0);
+            for (let i = 0; i <= lastStep; i++) {
+                let coreTop = topPoints[i].y * 0.45 + y0 * 0.55;
+                g.lineTo(topPoints[i].x, coreTop);
+            }
+            for (let i = lastStep; i >= 0; i--) {
+                let coreBottom = bottomPoints[i].y * 0.45 + y0 * 0.55;
+                g.lineTo(topPoints[i].x, coreBottom);
+            }
+            g.closePath();
+            g.fillPath();
         }
-        for (let i = steps; i >= 0; i--) {
-            let ptBottom = bottomPoints[i];
-            let coreBottom = ptBottom.y * 0.45 + y0 * 0.55;
-            g.lineTo(topPoints[i].x, coreBottom);
-        }
-        g.closePath();
-        g.fillPath();
 
         // Draw luminous lamp bulb lens glow
         if (typeof g.fillCircle === 'function') {
@@ -2288,12 +2406,19 @@ class ScubaFlowScene extends Phaser.Scene {
             g.fillCircle(x0, y0, 9.0);
         }
 
+
         return { x0: x0, dir: dir, topPoints: topPoints, bottomPoints: bottomPoints };
     }
 
     drawGuideLine() {
-        let g = this.terrainGraphics; // Draw on the terrain layer so it integrates nicely
-        if (!this.buddy) return;
+        if (!this.buddy || !this.guideLineGraphics) return;
+
+        let isRescuing = this.buddyState === 'assisting' || this.buddyState === 'clearing' || this.buddyState === 'relieved';
+        let g = this.guideLineGraphics;
+        g.clear();
+        // Normal: depth 1 (behind divers at 10, above terrain at 0)
+        // Rescue / silt-out: depth 15 (above silt cloud at 9 and silt overlay at 12)
+        g.setDepth(isRescuing ? 15 : 1);
 
         let bDir = this.buddy.scaleX;
         let reelWorldX = this.buddy.x + (-4) * bDir;
@@ -2515,7 +2640,7 @@ class ScubaFlowScene extends Phaser.Scene {
         }
 
         // --- Draw Wall Openings (cracks & windows as overlays on top of the terrain) ---
-        this.drawWallOpenings(g, startX, endX, floorPoints, ceilPoints, floorColor, ceilColor, flowFill, flowSat, flowLightBoost, floorHue, ceilHue);
+        this.drawWallOpenings(g, startX, endX, floorColor, ceilColor, flowFill, flowSat, flowLightBoost, floorHue, ceilHue);
 
         // Draw cave safety line guideline attached to buddy's reel
         this.drawGuideLine();
@@ -2611,7 +2736,7 @@ class ScubaFlowScene extends Phaser.Scene {
         };
     }
 
-    drawWallOpenings(g, startX, endX, floorPoints, ceilPoints, floorColor, ceilColor, flowFill, flowSat, flowLightBoost, floorHue, ceilHue) {
+    drawWallOpenings(g, startX, endX, floorColor, ceilColor, flowFill, flowSat, flowLightBoost, floorHue, ceilHue) {
         const SLOT_SIZE = 320; // world-px between opening-slot centres
         const OPEN_CHANCE = 0.55; // probability a slot has an opening
         const WIN_EVERY = 5;  // every Nth opening is a "depth window"
@@ -2893,7 +3018,16 @@ class ScubaFlowScene extends Phaser.Scene {
                 }
 
                 this.triggerSparkExplosion(debris.x, debris.y);
-                this.playCollectibleTone();
+                let noteIdx = (this.clusterCollected[debris.clusterId] || 1) - 1;
+                this.playCollectibleTone(noteIdx, isClusterComplete);
+
+                if (typeof navigator !== 'undefined' && navigator.vibrate && !this.useAutopilot) {
+                    if (isClusterComplete) {
+                        navigator.vibrate([20, 35, 25]);
+                    } else {
+                        navigator.vibrate(8);
+                    }
+                }
             }
         });
     }
@@ -3024,6 +3158,10 @@ class ScubaFlowScene extends Phaser.Scene {
             }
 
             this.playSiltThump();
+
+            if (typeof navigator !== 'undefined' && navigator.vibrate && !this.useAutopilot) {
+                navigator.vibrate(Math.min(90, 40 + Math.floor(impactSpeed * 0.5)));
+            }
 
             let px = this.player.x;
             let py = (source === 'floor') ? (this.player.y + 10) : (this.player.y - 10);
@@ -3162,13 +3300,15 @@ class ScubaFlowScene extends Phaser.Scene {
         // Sinking/descending is harder to react to, so downward slopes get symmetric/sufficient clearance.
         let slopeClearance = 31.0 + (slope < 0 ? -34.0 * slope : 36.0 * slope);
 
-        // Ensure baseOffset expands to allow clearance plus some margin
-        let baseOffset = Math.max(78 - localEnergy * 22, slopeClearance + 6); // 56–78px minimum base
+        // Dynamic macro cavern chambers: slow sinusoidal breathing opens up grand grottos
+        let chamberSwell = Math.sin(wx * 0.0012) * 24 * (1.0 - localEnergy * 0.5);
+        let baseOffset = Math.max(88 - localEnergy * 30 + chamberSwell, slopeClearance + 6);
         let jaggednessMultiplier = 0.35 + localEnergy * 0.85;
 
-        // Beat pulse scaled by multiplier — expands the cave on beat hits
+        // Beat pulse scaled by multiplier and local energy — organic rhythmic cave expansion
         let multiBeatScale = 1.0 + (this.visualMultiplier - 1) * 0.4;
-        let beatPulseOffset = (this.currentBeatPulse || 0) * 10 * (0.5 + localEnergy * 0.5) * multiBeatScale;
+        let energyFactor = 0.25 + localEnergy * 0.85;
+        let beatPulseOffset = (this.currentBeatPulse || 0) * 8.5 * energyFactor * multiBeatScale;
 
         // Dynamic extra-wide and smooth start zone from spawn up to 750px
         let isStartZone = wx < 750;
@@ -3187,15 +3327,15 @@ class ScubaFlowScene extends Phaser.Scene {
         let highFreqSpikeF = (Math.sin(wx * 0.09) * 8 + Math.cos(wx * 0.18) * 4) * jaggednessMultiplier;
         let highFreqSpikeC = (Math.sin(wx * 0.08) * 8 + Math.cos(wx * 0.17) * 4) * jaggednessMultiplier;
 
-        let floorOffset = Math.max(minCap, baseOffset + (Math.cos(wx * 0.015) * 10 + Math.sin(wx * 0.04) * 5) * jaggednessMultiplier - highFreqSpikeF) + beatPulseOffset;
-        let ceilOffset = Math.max(minCap, baseOffset + (Math.sin(wx * 0.02) * 10 + Math.cos(wx * 0.05) * 5) * jaggednessMultiplier - highFreqSpikeC) + beatPulseOffset;
+        let floorOffset = Math.max(minCap, baseOffset + (Math.cos(wx * 0.015) * 10 + Math.sin(wx * 0.04) * 5) * jaggednessMultiplier - highFreqSpikeF);
+        let ceilOffset = Math.max(minCap, baseOffset + (Math.sin(wx * 0.02) * 10 + Math.cos(wx * 0.05) * 5) * jaggednessMultiplier - highFreqSpikeC);
 
         // Guarantee 100% collectability without wall collisions:
         // Max downward offset is 40px (+8px player torso + 16px safety margin = 64px min floor offset)
         // Max upward offset is 28px (+16px player top + 16px safety margin = 60px min ceiling offset)
         return {
-            floorOffset: Math.max(64, floorOffset),
-            ceilOffset: Math.max(60, ceilOffset)
+            floorOffset: Math.max(64, floorOffset) + beatPulseOffset,
+            ceilOffset: Math.max(60, ceilOffset) + beatPulseOffset
         };
     }
 
@@ -3298,10 +3438,14 @@ class ScubaFlowScene extends Phaser.Scene {
         }
     }
 
-    playCollectibleTone() {
+    playCollectibleTone(noteIndex = 0, isClusterComplete = false) {
         if (this.useAutopilot) return; // Mute in music visualizer mode
         let ctx = this.audioContext;
         if (!ctx) return;
+
+        // C Major Pentatonic scale frequencies: C5, D5, E5, G5, A5, C6, D6, E6
+        const pentatonic = [523.25, 587.33, 659.25, 783.99, 880.00, 1046.50, 1174.66, 1318.51];
+        let freq = pentatonic[Math.abs(noteIndex) % pentatonic.length];
 
         let osc = ctx.createOscillator();
         let gainNode = ctx.createGain();
@@ -3309,15 +3453,20 @@ class ScubaFlowScene extends Phaser.Scene {
         osc.connect(gainNode);
         gainNode.connect(this.masterGain);
 
-        osc.type = 'sine';
-        osc.frequency.setValueAtTime(880, ctx.currentTime);
-        osc.frequency.exponentialRampToValueAtTime(1320, ctx.currentTime + 0.15);
-
-        gainNode.gain.setValueAtTime(0.05, ctx.currentTime);
-        gainNode.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.5);
+        osc.type = isClusterComplete ? 'triangle' : 'sine';
+        osc.frequency.setValueAtTime(freq, ctx.currentTime);
+        if (isClusterComplete) {
+            osc.frequency.exponentialRampToValueAtTime(freq * 1.5, ctx.currentTime + 0.18);
+            gainNode.gain.setValueAtTime(0.08, ctx.currentTime);
+            gainNode.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.55);
+        } else {
+            osc.frequency.exponentialRampToValueAtTime(freq * 1.25, ctx.currentTime + 0.12);
+            gainNode.gain.setValueAtTime(0.05, ctx.currentTime);
+            gainNode.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.35);
+        }
 
         osc.start();
-        osc.stop(ctx.currentTime + 0.6);
+        osc.stop(ctx.currentTime + (isClusterComplete ? 0.6 : 0.4));
     }
 
     playSiltThump() {
@@ -3397,74 +3546,10 @@ class ScubaFlowScene extends Phaser.Scene {
             }
         }
 
-        // 3. Schedule the levelComplete screen to show after the fadeout finishes (2 seconds)
-        // Redundantly use both Phaser's clock and a browser setTimeout to ensure completion when the tab is blurred.
-        this.time.delayedCall(2000, () => {
-            this.levelComplete();
-        }, [], this);
-
+        // 3. Show levelComplete screen after 2s fadeout finishes (setTimeout runs even when tab is blurred)
         setTimeout(() => {
             this.levelComplete();
         }, 2000);
-    }
-
-    showTrackStartOverlay(onCompleteCallback) {
-        let trackName = window.customTrackName || "Unknown Track";
-        let durationMs = this.levelData.songLengthMs || 0;
-        let minutes = Math.floor(durationMs / 60000);
-        let seconds = Math.floor((durationMs % 60000) / 1000);
-        let durationStr = `${minutes}:${seconds.toString().padStart(2, '0')}`;
-
-        let currentZone = this.getCurrentDepthZone();
-        let colorStr = currentZone ? '#' + currentZone.ceilColor.toString(16).padStart(6, '0') : '#00f0ff';
-
-        let infoText = this.add.text(600, 260, `TRACK: ${trackName.toUpperCase()}`, {
-            fontFamily: 'Outfit',
-            fontSize: '32px',
-            fontStyle: 'bold',
-            color: colorStr,
-            align: 'center'
-        }).setOrigin(0.5).setDepth(100).setAlpha(0).setScrollFactor(0);
-
-        let durationText = this.add.text(600, 310, `DURATION: ${durationStr}`, {
-            fontFamily: 'Outfit',
-            fontSize: '20px',
-            color: '#cbd5e1',
-            align: 'center'
-        }).setOrigin(0.5).setDepth(100).setAlpha(0).setScrollFactor(0);
-
-        this.startInfoText = infoText;
-        this.startDurationText = durationText;
-        this.cameras.main.ignore([infoText, durationText]);
-
-        this.tweens.add({
-            targets: [infoText, durationText],
-            alpha: 1,
-            duration: 500,
-            ease: 'Power2',
-            onComplete: () => {
-                this.time.delayedCall(1000, () => {
-                    this.tweens.add({
-                        targets: [infoText, durationText],
-                        alpha: 0,
-                        duration: 500,
-                        onComplete: () => {
-                            if (this.startInfoText) {
-                                this.startInfoText.destroy();
-                                this.startInfoText = null;
-                            }
-                            if (this.startDurationText) {
-                                this.startDurationText.destroy();
-                                this.startDurationText = null;
-                            }
-                            if (onCompleteCallback) {
-                                onCompleteCallback();
-                            }
-                        }
-                    });
-                });
-            }
-        });
     }
 
     levelComplete() {
@@ -3611,12 +3696,12 @@ class ScubaFlowScene extends Phaser.Scene {
         }
         
         let careerHTML = `
-            <div style="margin: 20px 0; padding: 12px 16px; background: rgba(0, 240, 255, 0.03); border: 1px solid rgba(0, 240, 255, 0.1); border-radius: 12px; text-align: left; font-size: 0.85rem; color: #94a3b8; line-height: 1.6;">
-                <div style="font-weight: bold; color: #cbd5e1; margin-bottom: 6px; letter-spacing: 1px; text-transform: uppercase;">LIFETIME FLOW CAREER:</div>
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
-                    <div>⏱ Time Drifting: <strong style="color: #e2e8f0;">${formattedTime}</strong></div>
-                    <div>🫧 Bubbles Blown: <strong style="color: #e2e8f0;">${career.lifetimeBubblesBlown}</strong></div>
-                    <div style="grid-column: span 2;">⚡ Peak Flow Multiplier: <strong style="color: #00f0ff;">x${career.peakScoreMultiplier}</strong></div>
+            <div style="margin: 0 0 6px 0; padding: 8px 12px; background: rgba(0, 240, 255, 0.03); border: 1px solid rgba(0, 240, 255, 0.1); border-radius: 12px; text-align: left; font-size: 0.8rem; color: #94a3b8; line-height: 1.5;">
+                <div style="font-weight: bold; color: #cbd5e1; margin-bottom: 4px; letter-spacing: 1px; text-transform: uppercase; font-size: 0.72rem;">LIFETIME FLOW CAREER:</div>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 4px 8px;">
+                    <div>⏱ Drift: <strong style="color: #e2e8f0;">${formattedTime}</strong></div>
+                    <div>🫧 Bubbles: <strong style="color: #e2e8f0;">${career.lifetimeBubblesBlown}</strong></div>
+                    <div style="grid-column: span 2;">⚡ Peak Flow: <strong style="color: #00f0ff;">x${career.peakScoreMultiplier}</strong></div>
                 </div>
             </div>
         `;
@@ -3655,8 +3740,8 @@ class ScubaFlowScene extends Phaser.Scene {
         }
 
         let titleStyle = isPerfect
-            ? 'background: linear-gradient(135deg, #00f0ff 0%, #ff00e4 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-size: 3.6rem; font-weight: 800; margin-bottom: 20px; letter-spacing: 3px; filter: drop-shadow(0 0 10px rgba(0, 240, 255, 0.6));'
-            : 'background: linear-gradient(135deg, #00f0ff 0%, #bd00ff 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-size: 3rem; font-weight: 700; margin-bottom: 20px; letter-spacing: 2px;';
+            ? 'background: linear-gradient(135deg, #00f0ff 0%, #ff00e4 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-size: clamp(1.8rem, 4vw, 2.6rem); font-weight: 800; margin-bottom: 6px; letter-spacing: 2px; filter: drop-shadow(0 0 10px rgba(0, 240, 255, 0.6));'
+            : 'background: linear-gradient(135deg, #00f0ff 0%, #bd00ff 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-size: clamp(1.6rem, 3.5vw, 2.2rem); font-weight: 700; margin-bottom: 6px; letter-spacing: 2px;';
 
         let titleText = isPerfect ? 'PERFECT FLOW' : 'DIVE COMPLETED';
 
@@ -3667,53 +3752,45 @@ class ScubaFlowScene extends Phaser.Scene {
         let durationStr = `${minutes}:${seconds.toString().padStart(2, '0')}`;
 
         let innerCard = document.createElement('div');
-        innerCard.className = 'glass-card';
-        innerCard.style.textAlign = 'center';
+        innerCard.className = 'glass-card results-card-inner';
         innerCard.innerHTML = `
-            <h1 style="${titleStyle}">${titleText}</h1>
-            <div style="font-size: 0.9rem; color: #94a3b8; margin-top: -10px; margin-bottom: 15px; font-weight: 500; letter-spacing: 1px;">
-                ${trackName.toUpperCase()} (${durationStr})
-            </div>
-            <div style="margin-bottom: 20px; display: flex; justify-content: center; align-items: center;">
-                ${starString}
-            </div>
-            <div style="font-size: 1.15rem; color: #cbd5e1; margin-bottom: 10px; line-height: 1.8;">
-                Neon Debris Gathered: <strong style="color: #00f0ff; font-size: 1.25rem;">${this.score}</strong> / ${this.totalCollectibles}<br>
-                Total Score: <strong style="color: #bd00ff; font-size: 1.5rem; text-shadow: 0 0 12px rgba(189, 0, 255, 0.4);">${this.pointsScore}</strong> / ${maxPoints} points
-            </div>
-            ${highScoreHTML}
-            ${careerHTML}
-            <div style="display: flex; flex-direction: column; gap: 10px; margin-top: 15px;">
-                <button id="btn-restart" class="btn-dive" style="box-shadow: 0 0 25px rgba(189, 0, 255, 0.4);">DIVE AGAIN (R)</button>
-                <button id="btn-results-exit" class="btn-secondary">SELECT NEW TRACK (X)</button>
+            <header style="text-align: center; margin-bottom: 4px;">
+                <h1 style="${titleStyle}">${titleText}</h1>
+                <div style="font-size: 0.85rem; color: #94a3b8; margin-top: -4px; margin-bottom: 6px; font-weight: 500; letter-spacing: 1px;">
+                    ${trackName.toUpperCase()} (${durationStr})
+                </div>
+                <div style="margin-bottom: 8px; display: flex; justify-content: center; align-items: center;">
+                    ${starString}
+                </div>
+            </header>
+            <div class="results-grid">
+                <div class="results-col-stats">
+                    <div style="font-size: 1.0rem; color: #cbd5e1; line-height: 1.5; background: rgba(255, 255, 255, 0.02); padding: 10px 14px; border-radius: 12px; border: 1px solid rgba(255, 255, 255, 0.05);">
+                        Neon Debris: <strong style="color: #00f0ff; font-size: 1.15rem;">${this.score}</strong> / ${this.totalCollectibles}<br>
+                        Total Score: <strong style="color: #bd00ff; font-size: 1.3rem; text-shadow: 0 0 12px rgba(189, 0, 255, 0.4);">${this.pointsScore}</strong> / ${maxPoints} pts
+                    </div>
+                    ${highScoreHTML}
+                </div>
+                <div class="results-col-actions">
+                    ${careerHTML}
+                    <div style="display: flex; flex-direction: column; gap: 8px; margin-top: 4px;">
+                        <button id="btn-restart" class="btn-dive" style="width: 100%; padding: 10px 18px; font-size: 0.92rem; box-shadow: 0 0 25px rgba(189, 0, 255, 0.4);">DIVE AGAIN (R)</button>
+                        <button id="btn-results-exit" class="btn-secondary" style="width: 100%; padding: 9px 16px; font-size: 0.85rem;">SELECT NEW TRACK (X)</button>
+                    </div>
+                </div>
             </div>
         `;
         card.appendChild(innerCard);
         parent.appendChild(card);
 
-        const bindFastTap = (btn, action) => {
-            if (!btn) return;
-            let lastTrigger = 0;
-            const handler = (e) => {
-                e.stopPropagation();
-                if (e.cancelable) e.preventDefault();
-                let now = Date.now();
-                if (now - lastTrigger < 350) return;
-                lastTrigger = now;
-                action();
-            };
-            btn.addEventListener('pointerdown', handler);
-            btn.addEventListener('touchstart', handler, { passive: false });
-            btn.addEventListener('click', handler);
-        };
-
+        const tap = window.bindFastTap || ((btn, action) => btn && btn.addEventListener('click', action));
         let restartBtn = document.getElementById('btn-restart');
         if (restartBtn) {
-            bindFastTap(restartBtn, () => this.restartDive());
+            tap(restartBtn, () => this.restartDive());
         }
         let exitBtn = document.getElementById('btn-results-exit');
         if (exitBtn) {
-            bindFastTap(exitBtn, () => this.exitToTrackSelect());
+            tap(exitBtn, () => this.exitToTrackSelect());
         }
     }
 
@@ -3785,22 +3862,6 @@ class ScubaFlowScene extends Phaser.Scene {
         if (this.playerBubble) this.playerBubble.setVisible(false);
 
         // Stop audio nodes
-        if (this.musicSource) {
-            try {
-                this.musicSource.onended = null;
-                this.musicSource.stop();
-                this.musicSource.disconnect();
-            } catch(e) {}
-            this.musicSource = null;
-        }
-        if (this.inhaleSource) {
-            try {
-                this.inhaleSource.stop();
-                this.inhaleSource.disconnect();
-            } catch(e) {}
-            this.inhaleSource = null;
-        }
-
         // Remove results card if present
         let card = document.getElementById('complete-screen') || document.getElementById('results-card');
         if (card) card.remove();
@@ -3816,7 +3877,8 @@ class ScubaFlowScene extends Phaser.Scene {
         this.vy = 0;
         this.buddy.x = 550;
         this.buddy.y = buddyStartY;
-        this.buddy.vy = 0;
+        // Stop all running audio sources before restarting
+        this.stopAllAudio();
 
         // Reset scores and flow state
         this.score = 0;
@@ -3851,6 +3913,10 @@ class ScubaFlowScene extends Phaser.Scene {
         }
         if (this.siltVignetteImage) {
             this.siltVignetteImage.setAlpha(0).setVisible(false);
+        }
+        if (this.guideLineGraphics) {
+            this.guideLineGraphics.clear();
+            this.guideLineGraphics.setDepth(1);
         }
 
         // Reset WebGL PostFX pipeline parameters
@@ -3921,20 +3987,7 @@ class ScubaFlowScene extends Phaser.Scene {
         }
     }
 
-    exitToTrackSelect() {
-        this.isPlaying = false;
-        this.isPaused = false;
-        this.tweens.killAll();
-        if (this.activeSiltBursts) {
-            for (let burst of this.activeSiltBursts) {
-                try { burst.destroy(); } catch (e) {}
-            }
-            this.activeSiltBursts = [];
-        }
-        if (this.buddyBubble) this.buddyBubble.setVisible(false);
-        if (this.playerBubble) this.playerBubble.setVisible(false);
-
-        // Stop audio nodes
+    stopAllAudio() {
         if (this.musicSource) {
             try {
                 this.musicSource.onended = null;
@@ -3950,9 +4003,100 @@ class ScubaFlowScene extends Phaser.Scene {
             } catch(e) {}
             this.inhaleSource = null;
         }
-        if (this.audioContext && this.audioContext.state === 'suspended') {
-            this.audioContext.resume();
+        if (this.exhaleSource) {
+            try {
+                this.exhaleSource.stop();
+                this.exhaleSource.disconnect();
+            } catch(e) {}
+            this.exhaleSource = null;
         }
+        if (this.inhaleGain && this.audioContext) {
+            try {
+                this.inhaleGain.gain.setValueAtTime(0, this.audioContext.currentTime);
+            } catch(e) {}
+        }
+        if (this.exhaleGain && this.audioContext) {
+            try {
+                this.exhaleGain.gain.setValueAtTime(0, this.audioContext.currentTime);
+            } catch(e) {}
+        }
+        if (this.masterGain && this.audioContext) {
+            try {
+                this.masterGain.gain.cancelScheduledValues(this.audioContext.currentTime);
+                this.masterGain.gain.setValueAtTime(0, this.audioContext.currentTime);
+            } catch(e) {}
+        }
+    }
+
+    exitToTrackSelect() {
+        this.isPlaying = false;
+        this.isPaused = false;
+        this.countdownActive = false;
+        if (this.tweens) this.tweens.killAll();
+        if (this.time) {
+            try { this.time.removeAllEvents(); } catch (e) {}
+        }
+        if (this.countdownText) {
+            try { this.countdownText.destroy(); } catch (e) {}
+            this.countdownText = null;
+        }
+        if (this.startInfoText) {
+            try { this.startInfoText.destroy(); } catch (e) {}
+            this.startInfoText = null;
+        }
+        if (this.startDurationText) {
+            try { this.startDurationText.destroy(); } catch (e) {}
+            this.startDurationText = null;
+        }
+        if (this.activeSiltBursts) {
+            for (let burst of this.activeSiltBursts) {
+                try { burst.destroy(); } catch (e) {}
+            }
+            this.activeSiltBursts = [];
+        }
+        if (this.buddyBubble) this.buddyBubble.setVisible(false);
+        if (this.playerBubble) this.playerBubble.setVisible(false);
+
+        if (this.onKeyDown) {
+            window.removeEventListener('keydown', this.onKeyDown);
+            this.onKeyDown = null;
+        }
+        if (this.onTouchStart) {
+            window.removeEventListener('touchstart', this.onTouchStart);
+            this.onTouchStart = null;
+        }
+        if (this.onTouchMove) {
+            window.removeEventListener('touchmove', this.onTouchMove);
+            this.onTouchMove = null;
+        }
+        if (this.onTouchEnd) {
+            window.removeEventListener('touchend', this.onTouchEnd);
+            this.onTouchEnd = null;
+        }
+        if (this.onTouchCancel) {
+            window.removeEventListener('touchcancel', this.onTouchCancel);
+            this.onTouchCancel = null;
+        }
+        if (this.onContextMenu) {
+            window.removeEventListener('contextmenu', this.onContextMenu);
+            this.onContextMenu = null;
+        }
+
+        // Completely stop and disconnect all audio generators to avoid background drone leakage
+        this.stopAllAudio();
+        if (this.masterGain) {
+            try { this.masterGain.disconnect(); } catch(e) {}
+            this.masterGain = null;
+        }
+        if (this.audioContext) {
+            try { this.audioContext.close(); } catch(e) {}
+            this.audioContext = null;
+        }
+        if (window.customAudioContext) {
+            try { window.customAudioContext.close(); } catch(e) {}
+            window.customAudioContext = null;
+        }
+        window.activeScubaScene = null;
 
         // Clean up DOM overlays
         let pauseScreen = document.getElementById('pause-screen');
@@ -4027,35 +4171,65 @@ class ScubaFlowScene extends Phaser.Scene {
             smoothedEnergy.push(sum / count);
         }
 
-        let maxEnergy = Math.max(...smoothedEnergy) || 0.001;
-        let maxRawEnergy = Math.max(...rawEnergy) || 0.001;
+        let maxEnergy = 0.001;
+        for (let e of smoothedEnergy) {
+            if (e > maxEnergy) maxEnergy = e;
+        }
+        let maxRawEnergy = 0.001;
+        for (let e of rawEnergy) {
+            if (e > maxRawEnergy) maxRawEnergy = e;
+        }
 
-        // High-Resolution Beat Parsing Pass
-        let beatWindowSec = 0.08; // Increased from 0.05 to smooth out audio noise
+        // Sub-bass Kick, Acoustic Percussion & Vocal Transient Extraction (Dual-stream)
+        let beatWindowSec = 0.08; // 80ms windowing
         let beatChunkSize = Math.floor(sampleRate * beatWindowSec);
         let numBeatChunks = Math.floor(channelData.length / beatChunkSize);
         let rawBeats = [];
+        let lp = 0;
+        let stride = 25;
+        let alpha = Math.min(1.0, (2.0 * Math.PI * 180.0) / sampleRate * stride);
+        let prevRms = 0;
         for (let c = 0; c < numBeatChunks; c++) {
             let start = c * beatChunkSize;
-            let sum = 0;
-            for (let i = 0; i < beatChunkSize; i += 50) {
-                sum += channelData[start + i] * channelData[start + i];
+            let sumBass = 0;
+            let sumRaw = 0;
+            let count = 0;
+            for (let i = 0; i < beatChunkSize; i += stride) {
+                let s = channelData[start + i];
+                lp += alpha * (s - lp);
+                sumBass += lp * lp;
+                sumRaw += s * s;
+                count++;
             }
-            rawBeats.push(Math.sqrt(sum / (beatChunkSize / 50)));
+            let bassRms = Math.sqrt(sumBass / (count || 1));
+            let rawRms = Math.sqrt(sumRaw / (count || 1));
+            // Positive energy flux (spectral transient onset for vocals, acoustics, percussions)
+            let flux = Math.max(0, rawRms - prevRms);
+            prevRms = rawRms;
+            rawBeats.push(bassRms * 0.50 + flux * 1.6 + rawRms * 0.25);
         }
 
-        let maxBeat = Math.max(...rawBeats) || 0.001;
         let beats = [];
         let lastBeatTime = -9999;
-        let absoluteBeatThreshold = 0.015; // Ignore quiet background noise/hiss
+        let absoluteBeatThreshold = 0.008; // Ignore quiet background hiss while capturing acoustic nuances
+        let localWindow = 14; // ~1.1s local window for adaptive onset thresholding
 
         for (let i = 1; i < rawBeats.length - 1; i++) {
             if (rawBeats[i] > rawBeats[i - 1] && rawBeats[i] > rawBeats[i + 1]) {
-                // Must exceed both 50% of the track peak AND the absolute noise floor
-                if (rawBeats[i] > maxBeat * 0.50 && rawBeats[i] > absoluteBeatThreshold) {
+                let localSum = 0;
+                let localCount = 0;
+                let wStart = Math.max(0, i - localWindow);
+                let wEnd = Math.min(rawBeats.length - 1, i + localWindow);
+                for (let w = wStart; w <= wEnd; w++) {
+                    localSum += rawBeats[w];
+                    localCount++;
+                }
+                let localAvg = localSum / (localCount || 1);
+                // Must exceed adaptive local onset average AND minimum noise threshold
+                if (rawBeats[i] > localAvg * 1.25 && rawBeats[i] > absoluteBeatThreshold) {
                     let beatTime = i * beatWindowSec * 1000;
-                    // Debouncer: Enforce minimum 250ms gap between visual beats
-                    if (beatTime - lastBeatTime >= 250) {
+                    // Debouncer: Enforce minimum 160ms gap between visual beats (supports rapid double bass / up to 375 BPM)
+                    if (beatTime - lastBeatTime >= 160) {
                         beats.push(beatTime);
                         lastBeatTime = beatTime;
                     }
@@ -4063,12 +4237,9 @@ class ScubaFlowScene extends Phaser.Scene {
             }
         }
 
-        // If track is very quiet, ambient, or spoken-word, it may yield almost no beats.
-        // Fall back to a steady, relaxing 60 BPM rhythm (every 1000ms) to ensure gameplay remains engaging.
-        let minExpectedBeats = songLengthMs / 5000;
-        if (beats.length < minExpectedBeats) {
-            console.log(`Procedural fallback: detected only ${beats.length} beats. Generating a relaxing 60 BPM grid.`);
-            beats = [];
+        // If track has zero detectable transients (e.g. silence or flat hum), fall back to 60 BPM grid
+        if (beats.length === 0) {
+            console.log("Procedural fallback: detected 0 beats. Generating a relaxing 60 BPM grid.");
             for (let t = 2000; t < songLengthMs - 2000; t += 1000) {
                 beats.push(t);
             }
@@ -4108,16 +4279,14 @@ class ScubaFlowScene extends Phaser.Scene {
         maxSmoothed = maxSmoothed || 0.001;
         let avgSmoothed = smoothedEnergy.reduce((a, b) => a + b, 0) / smoothedEnergy.length;
 
-        // Enforce a minimum dynamic energy range to avoid noise amplification on flat/quiet tracks
-        let energyRange = (maxSmoothed - minEnergy);
-        let isLowDynamicRange = energyRange < 0.12;
-        energyRange = Math.max(0.12, energyRange);
+        // Dynamic energy range scaling: ensure subtle shifts map to rich depth movement
+        let energyRange = Math.max(0.06, maxSmoothed - minEnergy);
 
         let path = [];
         // Scale slope difficulty based on scroll speed to guarantee climbs/descents are physically navigateable
         let maxDeltaY = 40.0;
         if (this.baseScrollSpeed === 45) {
-            maxDeltaY = 30.0; // gentle but still dynamic and fun slopes on calm tracks
+            maxDeltaY = 32.0; // gentle but dynamic slopes on calm tracks
         }
         let prevY = 250;
 
@@ -4131,16 +4300,12 @@ class ScubaFlowScene extends Phaser.Scene {
                 energyVal = smoothedEnergy[wrapIdx];
             }
             let norm = 0.5 + ((energyVal - avgSmoothed) / energyRange);
-            // Only compress dynamic range to keep the path flat if the song is actually flat/low-dynamic
-            let normLimit = isLowDynamicRange ? 0.20 : 0.40;
-            norm = Math.max(0.5 - normLimit, Math.min(0.5 + normLimit, norm));
+            norm = Math.max(0.10, Math.min(0.90, norm));
 
             let timeMs = i * windowSec * 1000;
 
             // Winding cave bends (large low-frequency curves to keep tunnels non-straight)
-            // Dampen winding bends only on flat/low-dynamic tracks.
-            let windingMult = isLowDynamicRange ? 0.35 : 1.0;
-            let windingBend = (Math.sin(timeMs * 0.00018) * 110 + Math.cos(timeMs * 0.00008) * 55) * windingMult;
+            let windingBend = Math.sin(timeMs * 0.00018) * 110 + Math.cos(timeMs * 0.00008) * 55;
             let targetY = yDepthMin + norm * (yDepthMax - yDepthMin) + windingBend;
 
             // Clamp center-path Y within safe limits to prevent clipping off-screen
@@ -4194,15 +4359,14 @@ class ScubaFlowScene extends Phaser.Scene {
             let energyVal, prevEnergyVal, nextEnergyVal, smoothedEnergyVal;
             if (i < rawEnergy.length) {
                 energyVal = rawEnergy[i];
-                prevEnergyVal = rawEnergy[i - 1];
-                nextEnergyVal = rawEnergy[i + 1];
+                prevEnergyVal = i > 0 ? rawEnergy[i - 1] : rawEnergy[i];
+                nextEnergyVal = i < rawEnergy.length - 1 ? rawEnergy[i + 1] : rawEnergy[i];
                 smoothedEnergyVal = smoothedEnergy[i];
             } else {
-                let wrapIdx = i % rawEnergy.length;
-                energyVal = rawEnergy[wrapIdx];
-                prevEnergyVal = rawEnergy[(i - 1) % rawEnergy.length];
-                nextEnergyVal = rawEnergy[(i + 1) % rawEnergy.length];
-                smoothedEnergyVal = smoothedEnergy[wrapIdx];
+                energyVal = 0.1;
+                prevEnergyVal = 0.1;
+                nextEnergyVal = 0.1;
+                smoothedEnergyVal = 0.1;
             }
 
             let isPeak = (energyVal > prevEnergyVal && energyVal > nextEnergyVal) && (energyVal > maxRawEnergy * 0.22);
@@ -4246,17 +4410,21 @@ class ScubaFlowScene extends Phaser.Scene {
             }
         }
 
-        let zoneNames = ["Neon Reef", "Gold Ridge", "Magenta Arch", "Abyssal Trench", "Cyan Ascent"];
+        // Vivid Neon Psychedelic Zones
+        let zoneNames = ["Neon Reef", "Solar Ridge", "Ultraviolet Cavern", "Molten Abyss", "Cyber Ascent"];
         let zoneColors = [
-            { floor: 0x00ff66, ceil: 0x00f0ff, bg: 0x010a12 },
-            { floor: 0xffcc00, ceil: 0xbd00ff, bg: 0x0b0212 },
-            { floor: 0xff007f, ceil: 0x4b0082, bg: 0x12010c },
-            { floor: 0xff5500, ceil: 0x9900ff, bg: 0x120501 },
-            { floor: 0x00ffff, ceil: 0x008080, bg: 0x010d12 }
+            { floor: 0x00ff88, ceil: 0x00f0ff, bg: 0x010c14 }, // Electric emerald & cyan
+            { floor: 0xffcc00, ceil: 0xff00b4, bg: 0x0e0212 }, // Solar gold & neon magenta
+            { floor: 0xff007f, ceil: 0x4b0082, bg: 0x12010c }, // Hot pink & deep indigo
+            { floor: 0xff6600, ceil: 0x9900ff, bg: 0x120501 }, // Bright amber orange & electric violet
+            { floor: 0x00ffff, ceil: 0x008080, bg: 0x010d12 }  // Electric aqua & radiant turquoise
         ];
 
+        // Seed initial baseHue so different songs feature unique starting color accents
+        this.baseHue = Math.floor(rng() * 360);
+
         let numZones = zoneNames.length;
-        let zoneDuration = levelLengthMs / numZones;
+        let zoneDuration = songLengthMs / numZones;
         let zones = [];
         for (let z = 0; z < numZones; z++) {
             let startTime = z * zoneDuration;
@@ -4622,6 +4790,9 @@ class ScubaFlowScene extends Phaser.Scene {
         console.assert(this.comboCount === 0, "Assertion Failed: comboCount must reset to 0");
         console.assert(this.lightFlashIntensity === 1.0, "Assertion Failed: lightFlashIntensity must reset to 1.0");
         console.assert(this.buddyState === 'normal', "Assertion Failed: buddyState must reset to 'normal'");
+        if (this.guideLineGraphics) {
+            console.assert(this.guideLineGraphics.depth === 1 || this.guideLineGraphics.depth === 15, "Assertion Failed: guideLineGraphics depth must be 1 or 15");
+        }
 
         this.activeSiltBursts = [{ destroy: () => {} }];
         for (let b of this.activeSiltBursts) b.destroy();
@@ -4636,12 +4807,68 @@ class ScubaFlowScene extends Phaser.Scene {
             console.assert(activeFX.fxTime !== undefined, "Assertion Failed: PsychedelicFX must have fxTime uniform");
         }
 
+        // Test 17: Diver Horizontal Trim
+        if (this.buddy) {
+            console.assert(this.buddy.rotation === 0, "Assertion Failed: buddy must maintain horizontal trim");
+        }
+        let mockTrimG = { fillStyle: () => {}, beginPath: () => {}, moveTo: () => {}, lineTo: () => {}, closePath: () => {}, fillPath: () => {} };
+        let testTrimLight = this.drawDiveLight(mockTrimG, 250, 300, 1, 0xffffff, 0x00f0ff, 0.5, false);
+        console.assert(testTrimLight && testTrimLight.topPoints && testTrimLight.topPoints.length === 31, "Assertion Failed: drawDiveLight must return topPoints in horizontal trim");
+
+        // Test 16: Rhythmic Cave Expansion & Dynamic Cavern Width
+        let savedBeatPulse = this.currentBeatPulse;
+        this.currentBeatPulse = 0.0;
+        let offsetsNoBeat = this.getWallOffsets(1500, 0.5);
+        this.currentBeatPulse = 1.0;
+        let offsetsWithBeat = this.getWallOffsets(1500, 0.5);
+        this.currentBeatPulse = savedBeatPulse;
+
+        console.assert(offsetsWithBeat.floorOffset > offsetsNoBeat.floorOffset, "Assertion Failed: Cavern walls must visibly expand on beat hit (floorOffset)");
+        console.assert(offsetsWithBeat.ceilOffset > offsetsNoBeat.ceilOffset, "Assertion Failed: Cavern walls must visibly expand on beat hit (ceilOffset)");
+
+        // Verify beat pulse amplitude scales with music energy
+        this.currentBeatPulse = 1.0;
+        let beatHigh = this.getWallOffsets(1500, 0.95);
+        let beatLow = this.getWallOffsets(1500, 0.05);
+        this.currentBeatPulse = 0.0;
+        let baseHigh = this.getWallOffsets(1500, 0.95);
+        let baseLow = this.getWallOffsets(1500, 0.05);
+        this.currentBeatPulse = savedBeatPulse;
+        let pulseDiffHigh = beatHigh.floorOffset - baseHigh.floorOffset;
+        let pulseDiffLow = beatLow.floorOffset - baseLow.floorOffset;
+        console.assert(pulseDiffHigh > pulseDiffLow, "Assertion Failed: High-energy beat pulse must expand walls more than low-energy beat pulse");
+
+        let ambientCavern = this.getWallOffsets(1500, 0.05); // low energy breakdown
+        let intenseCorridor = this.getWallOffsets(1500, 0.95); // high energy drop
+        console.assert(ambientCavern.floorOffset > intenseCorridor.floorOffset, "Assertion Failed: Ambient breakdown caverns must be wider than intense drop corridors");
+        let chamberPeak = this.getWallOffsets(1300, 0.05);
+        let chamberTrough = this.getWallOffsets(3900, 0.05);
+        console.assert(chamberPeak.floorOffset !== chamberTrough.floorOffset, "Assertion Failed: Macro cavern chambers must dynamically modulate corridor offset");
+
+        // Verify Vivid Neon Psychedelic Zones
+        let zones = this.levelData && this.levelData.zones;
+        console.assert(zones && zones.length === 5, "Assertion Failed: Exactly 5 Neon depth zones expected");
+        if (zones && zones.length === 5) {
+            console.assert(zones[0].name === "Neon Reef", "Assertion Failed: Zone 0 must be Neon Reef");
+            console.assert(zones[3].name === "Molten Abyss", "Assertion Failed: Zone 3 must be Molten Abyss");
+        }
+
+        // Test 18: Lifecycle Methods & Teardown definitions
+        console.assert(typeof this.exitToTrackSelect === 'function', "Assertion Failed: exitToTrackSelect must be a function");
+        console.assert(typeof this.restartDive === 'function', "Assertion Failed: restartDive must be a function");
+        console.assert(typeof this.stopAllAudio === 'function', "Assertion Failed: stopAllAudio must be a function");
+
         console.log("=== DIAGNOSTICS PASSED: ALL CONTROLS FUNCTIONAL ===");
     }
 }
 
 // Global Launcher Function
 function startGame() {
+    if (window.game) {
+        try { window.game.destroy(true); } catch(e) {}
+        window.game = null;
+    }
+    window.activeScubaScene = null;
     const config = {
         type: Phaser.AUTO,
         parent: 'game-container',
@@ -4659,14 +4886,17 @@ function startGame() {
     };
     window.game = new Phaser.Game(config);
 
-    const refreshScale = () => {
-        if (window.game && window.game.scale) {
-            window.game.scale.refresh();
-        }
-    };
-    window.addEventListener('resize', refreshScale);
-    window.addEventListener('orientationchange', () => {
-        setTimeout(refreshScale, 150);
-        setTimeout(refreshScale, 400);
-    });
+    if (!window._scubaResizeAttached) {
+        window._scubaResizeAttached = true;
+        const refreshScale = () => {
+            if (window.game && window.game.scale) {
+                window.game.scale.refresh();
+            }
+        };
+        window.addEventListener('resize', refreshScale);
+        window.addEventListener('orientationchange', () => {
+            setTimeout(refreshScale, 150);
+            setTimeout(refreshScale, 400);
+        });
+    }
 }
