@@ -613,6 +613,18 @@
             margin-bottom: 0;
         }
 
+        .instructions-minimal .key-hints {
+            font-size: 0.78rem;
+            color: #64748b;
+            margin-top: 6px;
+            letter-spacing: 0.5px;
+        }
+
+        .instructions-minimal .key-hints strong {
+            color: #cbd5e1;
+            text-shadow: none;
+        }
+
         .instructions-minimal strong {
             color: var(--primary);
             text-shadow: 0 0 8px rgba(0, 240, 255, 0.4);
@@ -839,8 +851,9 @@
                 <div class="subtitle">Neon Buoyancy Music Game</div>
                 
                 <div class="instructions-minimal">
-                    <p>⌨️ Hold <strong>Spacebar</strong> or <strong>Tap & Hold Screen</strong> to float, release to sink.</p>
+                    <p>⌨️ Hold <strong>Spacebar</strong> or <strong>Tap &amp; Hold Screen</strong> to float, release to sink.</p>
                     <p>💎 Collect neon debris, avoid the walls, and flow with the music.</p>
+                    <p class="key-hints">🎮 <strong>F</strong> Fullscreen &bull; <strong>P</strong> / <strong>Esc</strong> Pause &bull; <strong>R</strong> Restart</p>
                 </div>
 
                 <div class="uploader-container">
@@ -916,7 +929,8 @@
                 btn.removeAttribute('disabled');
                 btn.style.opacity = '1';
                 btn.style.pointerEvents = 'auto';
-                btn.textContent = 'Begin Dive';
+                const isTouch = ('ontouchstart' in window || navigator.maxTouchPoints > 0);
+                btn.textContent = isTouch ? 'Begin Dive' : 'Begin Dive (Enter)';
             };
             reader.readAsArrayBuffer(file);
         }
@@ -1017,12 +1031,22 @@
             }
         }
 
-        // Global Fullscreen Hotkey (F) available across intro, gameplay, pause, results
+        // Global Hotkeys: F (Fullscreen), Enter (Begin Dive on Intro Screen)
         window.addEventListener('keydown', (e) => {
             if ((e.key === 'f' || e.key === 'F') && !e.ctrlKey && !e.altKey && !e.metaKey) {
                 if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
                 e.preventDefault();
                 if (window.toggleFullscreen) window.toggleFullscreen();
+            } else if (e.key === 'Enter') {
+                let intro = document.getElementById('intro-screen');
+                let diveBtn = document.getElementById('btn-dive');
+                if (intro && intro.style.display !== 'none' && !intro.classList.contains('descending')) {
+                    if (diveBtn && !diveBtn.disabled && diveBtn.getAttribute('disabled') === null) {
+                        if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'A')) return;
+                        e.preventDefault();
+                        diveBtn.click();
+                    }
+                }
             }
         });
 

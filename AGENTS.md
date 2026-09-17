@@ -89,6 +89,12 @@ For ScubaFlow:
 - **Seamless Desktop Borderless Viewport:**
   - `#game-container` fills 100% width and height without fixed 1200x700 box borders or glowing boxes in fullscreen / F11 mode.
   - `#game-container canvas` suppresses browser `:focus-visible` outlines to eliminate white boundary lines upon keyboard input.
+- **Start Menu Hotkeys & Desktop Key Guide:**
+  - Intro screen displays diegetic key guide: `F` (Fullscreen), `P` / `Esc` (Pause), `R` (Restart).
+  - Pressing `Enter` when track is loaded automatically triggers "Begin Dive (Enter)".
+- **Honest Track Best & Autopilot Isolation:**
+  - Track Best binds points score and collectible % to a single coherent run, preventing cross-run stat combinations (Frankenstein stats).
+  - Autopilot runs display visualizer banner and do not overwrite human high score records.
 - **Unified Countdown & Dive Background Luminance:**
   - Base colors unified to pure void `#000206` across HTML `body`, `--bg-color`, `.ambient-glow`, `#game-container`, `#intro-screen`, Phaser game config, decoder overlay, camera `fadeOut`, and `this.cameras.main.setBackgroundColor` (`lightnessBoost = 0.012`), eliminating blue tint bleed and brightness shifts.
 

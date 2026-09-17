@@ -3519,18 +3519,27 @@ class ScubaFlowScene extends Phaser.Scene {
             console.error("Failed to read highscore from localStorage", e);
         }
         
-        let isNewHighPoints = this.pointsScore > prevHighPointsScore;
-        let highPointsScore = Math.max(prevHighPointsScore, this.pointsScore);
-        let maxCollectiblesPercent = Math.max(prevMaxCollectiblesPercent, debrisPercent);
-        
-        try {
-            localStorage.setItem(scoreKey, JSON.stringify({
-                trackHash: trackHash,
-                highPointsScore: highPointsScore,
-                maxCollectiblesPercent: parseFloat(maxCollectiblesPercent.toFixed(1))
-            }));
-        } catch (e) {
-            console.error("Failed to save highscore to localStorage", e);
+        let isNewHighPoints = !this.useAutopilot && (this.pointsScore > prevHighPointsScore);
+        let highPointsScore = prevHighPointsScore;
+        let maxCollectiblesPercent = prevMaxCollectiblesPercent;
+
+        if (this.useAutopilot) {
+            // Autopilot visualizer mode: do not overwrite personal bests
+            highPointsScore = prevHighPointsScore;
+            maxCollectiblesPercent = prevMaxCollectiblesPercent;
+        } else if (isNewHighPoints || prevHighPointsScore === 0) {
+            // Coherent single-run best (points and item % belong to the same dive)
+            highPointsScore = this.pointsScore;
+            maxCollectiblesPercent = debrisPercent;
+            try {
+                localStorage.setItem(scoreKey, JSON.stringify({
+                    trackHash: trackHash,
+                    highPointsScore: highPointsScore,
+                    maxCollectiblesPercent: parseFloat(maxCollectiblesPercent.toFixed(1))
+                }));
+            } catch (e) {
+                console.error("Failed to save highscore to localStorage", e);
+            }
         }
         
         // Lifetime Career Profile Tracking
@@ -3549,14 +3558,15 @@ class ScubaFlowScene extends Phaser.Scene {
             console.error("Failed to read career from localStorage", e);
         }
         
-        career.lifetimeDiveTimeMs = (career.lifetimeDiveTimeMs || 0) + this.elapsedTime;
-        career.lifetimeBubblesBlown = (career.lifetimeBubblesBlown || 0) + (this.exhaleBubblesCount || 0);
-        career.peakScoreMultiplier = Math.max(career.peakScoreMultiplier || 1, this.scoreMultiplier);
-        
-        try {
-            localStorage.setItem(careerKey, JSON.stringify(career));
-        } catch (e) {
-            console.error("Failed to save career to localStorage", e);
+        if (!this.useAutopilot) {
+            career.lifetimeDiveTimeMs = (career.lifetimeDiveTimeMs || 0) + this.elapsedTime;
+            career.lifetimeBubblesBlown = (career.lifetimeBubblesBlown || 0) + (this.exhaleBubblesCount || 0);
+            career.peakScoreMultiplier = Math.max(career.peakScoreMultiplier || 1, this.scoreMultiplier);
+            try {
+                localStorage.setItem(careerKey, JSON.stringify(career));
+            } catch (e) {
+                console.error("Failed to save career to localStorage", e);
+            }
         }
         
         // Format lifetime stats
@@ -3566,7 +3576,13 @@ class ScubaFlowScene extends Phaser.Scene {
         let formattedTime = `${mins}m ${secs}s`;
         
         let highScoreHTML = "";
-        if (prevHighPointsScore > 0) {
+        if (this.useAutopilot) {
+            highScoreHTML = `
+                <div style="font-size: 0.95rem; color: #94a3b8; margin-top: 10px; border-top: 1px solid rgba(0, 240, 255, 0.15); padding-top: 12px; text-align: center;">
+                    AUTOPILOT VISUALIZER MODE &bull; ${prevHighPointsScore > 0 ? `Track Best: <strong style="color: #00f0ff;">${prevHighPointsScore} pts</strong> (${prevMaxCollectiblesPercent.toFixed(1)}%)` : 'High score tracking paused'}
+                </div>
+            `;
+        } else if (prevHighPointsScore > 0) {
             highScoreHTML = `
                 <div style="font-size: 0.95rem; color: #94a3b8; margin-top: 10px; border-top: 1px solid rgba(0, 240, 255, 0.15); padding-top: 12px; display: flex; justify-content: space-around;">
                     <div>TRACK BEST: <strong style="color: #00f0ff;">${highPointsScore} pts</strong> (${maxCollectiblesPercent.toFixed(1)}%)</div>
@@ -3576,7 +3592,7 @@ class ScubaFlowScene extends Phaser.Scene {
         } else {
             highScoreHTML = `
                 <div style="font-size: 0.95rem; color: #94a3b8; margin-top: 10px; border-top: 1px solid rgba(0, 240, 255, 0.15); padding-top: 12px; text-align: center;">
-                    FIRST RUN LOGGED! Track best set to <strong style="color: #00f0ff;">${highPointsScore} pts</strong>
+                    FIRST RUN LOGGED! Track best set to <strong style="color: #00f0ff;">${highPointsScore} pts</strong> (${maxCollectiblesPercent.toFixed(1)}%)
                 </div>
             `;
         }
@@ -4599,9 +4615,13 @@ class ScubaFlowScene extends Phaser.Scene {
         this.activeSiltBursts = [];
         console.assert(this.activeSiltBursts.length === 0, "Assertion Failed: activeSiltBursts must clear on reset");
 
-        let mockFX = new PsychedelicFX({});
-        console.assert(mockFX.causticIntensity !== undefined, "Assertion Failed: PsychedelicFX must have causticIntensity uniform");
-        console.assert(mockFX.fxTime !== undefined, "Assertion Failed: PsychedelicFX must have fxTime uniform");
+        console.assert(typeof PsychedelicFX === 'function', "Assertion Failed: PsychedelicFX class must be defined");
+        console.assert(typeof PsychedelicFX.prototype.onPreRender === 'function', "Assertion Failed: PsychedelicFX must implement onPreRender");
+        let activeFX = (this.cameras && this.cameras.main) ? this.cameras.main.getPostPipeline(PsychedelicFX) : null;
+        if (activeFX) {
+            console.assert(activeFX.causticIntensity !== undefined, "Assertion Failed: PsychedelicFX must have causticIntensity uniform");
+            console.assert(activeFX.fxTime !== undefined, "Assertion Failed: PsychedelicFX must have fxTime uniform");
+        }
 
         console.log("=== DIAGNOSTICS PASSED: ALL CONTROLS FUNCTIONAL ===");
     }
