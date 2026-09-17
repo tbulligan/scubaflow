@@ -29,7 +29,7 @@ For ScubaFlow:
 - Procedurally generate cave paths, beats, depth zones, collectible clusters from uploaded audio track.
 - Rhythm parsing, visual ripples, audio events sync via `audioContext.currentTime` (not Phaser delta frames).
 - **High-Resolution Beat Parsing & Pacing Tiers**:
-  - Dual-stream transient extraction blending sub-bass ($<180\text{Hz}$ lowpass at $50\%$) with positive Spectral Flux onset ($\Delta\text{RMS}^+$ at $1.6\times$) and raw RMS ($25\%$), evaluated with adaptive local moving-window thresholding (`rawBeats[i] > localAvg * 1.25` and noise floor `0.008`) and 160ms debouncing. Reliably extracts rhythm from vocal chanting, acoustic instruments, sub-bass kicks, and high-tempo speed metal / double-bass drumming (up to 375 BPM).
+  - Dual-stream transient extraction blending sub-bass ($<180\text{Hz}$ lowpass at $50\%$) with positive Spectral Flux onset ($\Delta\text{RMS}^+$ at $1.6\times$) and raw RMS ($25\%$), evaluated with adaptive local moving-window thresholding and debouncing. Dynamically tuned by track energy: calm tracks (<0.08 energy) use 350ms debouncing, $1.38\times$ onset ratio, and 0.013 noise floor to pulse naturally with musical/vocal phrases without vibrato jitter; intense tracks use 160ms debouncing and $1.25\times$ ratio for rapid drum/kick transients.
   - Three distinct pacing tiers: Calm (<0.08 energy: 45 px/s, depth 200–500, spacer 3000ms), Moderate (55 px/s, depth 150–550, spacer 2000ms), and Intense (>=0.16 energy: 68 px/s, depth 100–600, spacer 1400ms).
   - Sweeping winding cave bends with up to 165px vertical excursion (`sin * 110 + cos * 55`) delivering dramatic climbs and dives across all tracks without artificial flattening on low-dynamic music.
 - **Harmonic Pentatonic Audio Feedback**:
@@ -47,7 +47,7 @@ For ScubaFlow:
   - **drag**: High vertical hydrodynamic drag dampens velocity.
   - **buoyancy tuning**: Buoyancy responsiveness `4.8`, vertical accel $a_y = 640$.
   - **mobile input & canvas scale**: Phaser `Scale.FIT` layout with `touch-action: none` prevents gesture collision on tap & hold.
-  - **bubble drift**: Exhaled bubbles drift backwards (`speedX: [-45, -15]`) relative to forward-swimming diver.
+  - **bubble drift & scale**: Exhaled bubbles drift backwards (`speedX: [-45, -15]`) relative to forward-swimming diver with natural turbulent scale variance (`scale: [0.10, 0.42]`).
 
 ### Start Countdown Timer
 - 3.0s unified start sequence (four 750ms ticks: "3", "2", "1", "FLOW!"), displaying track title and duration overlay concurrently above countdown numbers. Eliminates dead-air delays.
@@ -68,7 +68,7 @@ For ScubaFlow:
   - Tunnels stay navigable. Procedural collectibles (up to $24\text{px}$ offset, clamped $\ge 40\text{px}$ clear from boundaries) attainable without collision.
 - **Macro Cavern Chambers & Rhythmic Beat Bounce**:
   - Dynamic macro cavern chamber breathing (`chamberSwell = Math.sin(wx * 0.0012) * 24 * (1.0 - localEnergy * 0.5)`) smoothly opens calm ambient/breakdown passages into grand grottos (up to 112px base offset), contracting to tight technical challenge corridors during intense drops.
-  - Cavern boundaries (`getWallOffsets`) expand outward with beat hits (`beatPulseOffset = (currentBeatPulse || 0) * 8.5 * (0.25 + localEnergy * 0.85) * multiBeatScale`), driven by zero-velocity quadratic ease-out decay scaled to current tempo interval ($T_{beat} \times (0.75 - 0.20 \cdot \text{energy})$). Eliminates mechanical two-position twitch while preserving organic rhythmic breathing across all musical tempos.
+  - Cavern boundaries (`getWallOffsets`) expand outward with beat hits (`beatPulseOffset = (currentBeatPulse || 0) * 8.5 * energyFactor * multiBeatScale`), driven by a continuous attack-decay envelope ($65\text{ms}$ attack swell on calm tracks, $28\text{ms}$ on intense tracks) followed by zero-velocity quadratic decay. On calm tracks (<0.08 energy), `energyFactor` scales softly to a serene 0.4–1.0px breath, eliminating mechanical twitches on vocal/choral music.
   - Tightly tuned challenge corridors ($56\text{–}78\text{px}$ base offset, $\ge 112\text{px}$ total corridor clearance) preserve high-speed flow and danger.
 
 ### End of Dive Sequence
@@ -116,7 +116,7 @@ For ScubaFlow:
 
 ### Zero-HUD Diegetic Signals & Balance Mechanics
 Feedback physical + auditory:
-- **Vivid Neon Psychedelic Depth Zones**: High-contrast, hyper-saturated neon progression (Neon Reef -> Solar Ridge -> Ultraviolet Cavern -> Molten Abyss -> Cyber Ascent) with deterministic track-seeded base hue variance.
+- **Vivid Neon Psychedelic Depth Zones**: High-contrast, hyper-saturated neon progression (Neon Reef -> Solar Ridge -> Ultraviolet Cavern -> Molten Abyss -> Cyber Ascent) with deterministic track-seeded base hue variance and seamless bidirectional 24-second cross-fade angular hue interpolation (`getCurrentZoneHues`) between zones — last 12s of outgoing zone fades out while first 12s of incoming zone fades in, using smoothstep easing — to eliminate abrupt color snapping.
 - **Lung Volume**: Player sprite chest expansion (ellipse scale) + breathing audio synth freq.
 - **Failure - Silt-Out & Light Cone Failure**: Wall collision blind player with particle cloud. Wait for silt to clear while steady.
   - **Relative Duration**: Silt recovery time proportional to vertical impact velocity (`impactVy`), scale 0.44x-1.33x of `siltDuration` (~800ms to ~2400ms). Duration scale inverse with `baseScrollSpeed` (factor $50/\text{baseScrollSpeed}$).
@@ -128,7 +128,7 @@ Feedback physical + auditory:
 - **Active AI Companion Guide**:
   - **Center-Channel Scout Drafting**: Buddy tracks true corridor midpoint (`(floorY + ceilY) * 0.5`) with organic sinusoidal breathing sway ($\pm 10\text{px}$) and generous boundary margins ($18\text{–}32\text{px}$). Fluid exponential glide ($k = 2.2$ on Y, $k = 0.9$ on X) absorbs high-frequency rock spikiness and decouples flipper flutter, eliminating jitter and rock hugging.
   - **Horizontal Trim**: Divers maintain realistic technical cave diving horizontal trim with level forward-facing dive lamps, eliminating unnatural tilt jitter.
-- **Realistic Flashlight Occlusion**: Flashlight beam raycast shadow-casting obstructed by terrain protrusions. Snow illumination check interpolate occluded beam points.
+- **Realistic Flashlight Occlusion & Continuous Gradual Attenuation**: Flashlight beam raycast shadow-casting obstructed by terrain protrusions. Multi-slice progressive polynomial attenuation ($T(t) = (1 - t^2)^2$) smoothly tapers beam from emitter to zero at outer range without stepped cutoff bands. Snow illumination check interpolate occluded beam points.
 - **Mobile Web Haptics API (`navigator.vibrate`)**:
   - Breath transition: $12\text{ms}$ tap on inhalation/exhalation turnaround.
   - Collectibles: $8\text{ms}$ click on debris pickup, $[20, 35, 25]\text{ms}$ double-pulse chord on cluster completion.
@@ -139,6 +139,7 @@ Multiplier performance-driven:
 - **The Combo Engine**: Collect 15 consecutive neon debris without wall hit add $+1$ multiplier.
 - **Cluster Combo Boost**: Collect 100% procedural cluster (`clusterId`) award $+5$ combo point boost.
 - **Flow Decay Meter**: No debris for 12.5s decay multiplier by $1$. Collect debris refill buffer to 100%.
+- **Continuous Multiplier Smoothing (`smoothVisualMultiplier`)**: Visual attributes (terrain stroke width, neon fill alpha, saturation boost, aura ring expansion, marine snow speed) smoothly interpolate with exponential damping towards integer `scoreMultiplier`, eliminating visual snapping on combo pickups, flow decay, or silt impacts.
 
 ### "Hyper-Flow" State ($\ge \times 9$)
 Multiplier $\ge \times 9$ (cap intensity at $\times 9$):
@@ -158,10 +159,10 @@ Multiplier $\ge \times 10$:
 ### Cinematic Visuals & PostFX Pipeline
 - **Living Underwater Micro-Refraction**: WebGL `PsychedelicFX` shader applies subtle organic liquid wave distortion to screen UVs (`uTime`).
 - **Dynamic Bioluminescent Caustics**: Voronoi-approx underwater light mesh (`uCausticIntensity`) shimmers across cave walls, dynamically scaling with audio beats and flow state.
-- **Deep-Sea Vignette & Volumetric Haze**: Smooth radial contrast falloff combined with procedural deep-ocean scattering haze (`vec3(0.002, 0.012, 0.026)`) towards dark abyss corners.
+- **Deep-Sea Edge Vignette**: Smooth radial contrast falloff (`dot * 0.85`) gently dimming screen corners and edges toward pitch-black void `#000206` without washing out scene contrast.
 - **Radiant Diamond Shard Debris & Glint Sparks**: Collectibles rendered as glowing multi-stop diamond crystals with rotating core and outer neon aura. Debris explosions release 4-point diamond glint stars.
 - **Translucent Scuba Bubbles & Specular Sheen**: Dedicated procedural bubble texture featuring spherical glass membrane, internal refraction, and dual specular light highlights for breathing exhales and ambient floating bubbles.
-- **Luminous Lamp Lens Halos**: Player and buddy dive lamps emit radiant halogen bulb glows at beam origins.
+- **Luminous Lamp Lens Halos**: Player and buddy dive lamps emit radiant multi-ring halogen bulb blooms at beam origins with smooth optical falloff.
 
 ### Uncapped Deterministic Simulation
 - Rating calculation via `calculateMaxPotentialPoints()`.

@@ -38,12 +38,11 @@ class PsychedelicFX extends Phaser.Renderer.WebGL.Pipelines.PostFXPipeline {
                     float caustic = pow(clamp(0.5 + 0.5 * sin(p2 * 2.5), 0.0, 1.0), 4.0);
                     vec3 causticCol = vec3(0.0, 0.94, 1.0) * (caustic * uCausticIntensity);
 
-                    // 4. Subtle cinematic edge vignette & deep-sea volumetric depth haze
+                    // 4. Subtle cinematic edge vignette
                     vec2 vigCoord = (uv - 0.5) * vec2(1.25, 1.0);
-                    float vig = clamp(1.0 - dot(vigCoord, vigCoord) * 0.38, 0.0, 1.0);
-                    vec3 hazeCol = vec3(0.002, 0.012, 0.026) * (1.0 - vig);
+                    float vig = clamp(1.0 - dot(vigCoord, vigCoord) * 0.85, 0.0, 1.0);
 
-                    vec3 finalRGB = (vec3(r, g, b) + causticCol) * vig + hazeCol;
+                    vec3 finalRGB = (vec3(r, g, b) + causticCol) * vig;
 
                     gl_FragColor = vec4(finalRGB, a);
                 }
@@ -68,7 +67,7 @@ class ScubaFlowScene extends Phaser.Scene {
     }
 
     get visualMultiplier() {
-        return Math.min(9, this.scoreMultiplier);
+        return Math.min(9, this.smoothVisualMultiplier || this.scoreMultiplier || 1);
     }
 
     normalizeAudioBuffer(audioBuffer) {
@@ -129,6 +128,7 @@ class ScubaFlowScene extends Phaser.Scene {
         this.currentBeatPulse = 0;
         this.localEnergy = 0.2;
         this.baseHue = 0;
+        this.wallHueOffset = 0;
         this.beatRipples = [];
         this.lastProcessedBeatIdx = -1;
 
@@ -156,6 +156,7 @@ class ScubaFlowScene extends Phaser.Scene {
         // Score Flow State points system
         this.siltFreeTime = 0;
         this.scoreMultiplier = 1;
+        this.smoothVisualMultiplier = 1.0;
         this.comboCount = 0;
         this.flowMeter = 1.0;
         this.decayThreshold = 12500; // 12.5 seconds
@@ -845,6 +846,12 @@ class ScubaFlowScene extends Phaser.Scene {
             if (dt < 0) dt = 0; // Prevent negative time steps due to clock jitter
             let deltaMs = dt * 1000;
             let physDt = Math.min(dt, 0.15); // cap physics step to prevent physics engine explosions
+            let blendRate = this.siltActive ? 2.2 : 3.2;
+            this.smoothVisualMultiplier = Phaser.Math.Linear(
+                this.smoothVisualMultiplier || 1.0,
+                this.scoreMultiplier || 1,
+                Math.min(1.0, dt * blendRate)
+            );
 
             // Start fadeout when player reaches targetEndX, track completes, or time runs out
             if ((this.player.x >= this.targetEndX || this.musicCompleted || this.elapsedTime >= this.levelData.songLengthMs) && !this.isFadingOut) {
@@ -1126,10 +1133,17 @@ class ScubaFlowScene extends Phaser.Scene {
                 let decayRatio = 0.75 - currentEnergy * 0.20;
                 let pulseDuration = Math.min(800, Math.max(160, beatInterval * decayRatio));
 
-                if (timeSinceBeat < pulseDuration) {
-                    let progress = timeSinceBeat / pulseDuration;
-                    // Quadratic ease-out: punchy musical transient attack with smooth zero-velocity settling
-                    let p = 1.0 - progress;
+                // Natural attack-decay envelope: eliminates zero-attack frame-snapping
+                // Calm vocal/ambient tracks swell smoothly over 65ms; high-energy tracks punch in 28ms
+                let attackDuration = currentEnergy < 0.08 ? 65 : 28;
+                let decayDuration = Math.max(100, pulseDuration - attackDuration);
+
+                if (timeSinceBeat < attackDuration) {
+                    let attackProgress = timeSinceBeat / attackDuration;
+                    pulse = Math.sin(attackProgress * (Math.PI / 2));
+                } else if (timeSinceBeat < pulseDuration) {
+                    let decayProgress = (timeSinceBeat - attackDuration) / decayDuration;
+                    let p = 1.0 - decayProgress;
                     pulse = p * p;
                 }
             }
@@ -1149,6 +1163,7 @@ class ScubaFlowScene extends Phaser.Scene {
             // Hue speed escalates with flow multiplier — at x5 it spins 3x as fast
             let hueSpeed = 2.2 + (this.visualMultiplier - 1) * 2.8;
             this.baseHue = (this.baseHue + dt * hueSpeed) % 360;
+            this.wallHueOffset = (this.wallHueOffset + dt * hueSpeed * 0.5) % 360;
             let bgHue = (this.baseHue * 0.25) % 360;
             let multiBeat = 1.0 + (this.visualMultiplier - 1) * 0.55;
             
@@ -1485,7 +1500,7 @@ class ScubaFlowScene extends Phaser.Scene {
             lifespan: 1800,
             speedY: { min: -120, max: -40 },
             speedX: { min: -45, max: -15 },
-            scale: { start: 0.35, end: 1.1 },
+            scale: { min: 0.10, max: 0.42 },
             alpha: { start: 0.85, end: 0 },
             frequency: -1,
             blendMode: 'ADD'
@@ -1576,9 +1591,10 @@ class ScubaFlowScene extends Phaser.Scene {
         let bHandX = this.buddy.x + 26 * bDir;
         let bHandY = this.buddy.y - 2;
 
+        let currentVisMult = this.smoothVisualMultiplier || this.scoreMultiplier || 1;
         let speedMultiplier = 1.0;
-        if (this.scoreMultiplier >= 9) {
-            let speedScale = Math.min(7, this.scoreMultiplier - 8);
+        if (currentVisMult >= 8.5) {
+            let speedScale = Math.min(7, currentVisMult - 8);
             speedMultiplier += speedScale * 0.20;
         }
 
@@ -1657,12 +1673,8 @@ class ScubaFlowScene extends Phaser.Scene {
             let illuminated = inPlayerCone || inBuddyCone;
             
             // Adjust alpha targets. At x10+, make everything significantly brighter for "wow" effect!
-            let targetAlpha;
-            if (this.scoreMultiplier >= 10) {
-                targetAlpha = illuminated ? 0.85 : 0.25;
-            } else {
-                targetAlpha = illuminated ? 0.40 : 0.05;
-            }
+            let isSuper = currentVisMult >= 9.5;
+            let targetAlpha = isSuper ? (illuminated ? 0.85 : 0.25) : (illuminated ? 0.40 : 0.05);
             mote.alpha += (targetAlpha - mote.alpha) * 0.1;
 
             // Hide marine snow that is inside the cave walls (terrain)
@@ -1677,15 +1689,15 @@ class ScubaFlowScene extends Phaser.Scene {
             if (illuminated) {
                 color = 0x00f0ff;
             } else {
-                color = this.scoreMultiplier >= 10 ? 0x38bdf8 : 0x475569;
+                color = isSuper ? 0x38bdf8 : 0x475569;
             }
 
             g.fillStyle(color, mote.alpha);
-            if (this.scoreMultiplier >= 10) {
-                // Motion blur effect: stretch snow particles horizontally into prominent speed lines
-                let visualSuperScale = Math.min(6, this.scoreMultiplier - 9);
-                let streakLength = mote.size * (4.0 + visualSuperScale * 6.0);
-                // Thickened from mote.size * 0.4 to mote.size * 0.9 for dramatic visual feedback
+            if (currentVisMult >= 9.2) {
+                // Motion blur effect: smoothly stretch snow particles horizontally into speed lines
+                let blurFrac = Math.min(1.0, (currentVisMult - 9.2) / 0.8);
+                let visualSuperScale = Math.max(0, Math.min(6, currentVisMult - 9));
+                let streakLength = mote.size * (1.0 + blurFrac * (3.0 + visualSuperScale * 6.0));
                 g.fillRect(mote.x - streakLength, mote.y - mote.size * 0.9, streakLength * 2, mote.size * 1.8);
             } else {
                 g.fillCircle(mote.x, mote.y, mote.size);
@@ -2024,10 +2036,12 @@ class ScubaFlowScene extends Phaser.Scene {
 
         // --- AURA RINGS: concentric neon rings that grow with scoreMultiplier ---
         // x1: none. x2-x7: rings. x8+: 7 rings.
-        let auraLevels = Math.min(this.visualMultiplier - 1, 7);
-        let visualSuperScale = Math.max(0, Math.min(6, this.scoreMultiplier - 9));
+        let curMultiplier = this.smoothVisualMultiplier || this.scoreMultiplier || 1;
+        let auraLevels = Math.max(0, Math.min(curMultiplier - 1, 7));
+        let visualSuperScale = Math.max(0, Math.min(6, curMultiplier - 9));
+        let numRings = Math.ceil(auraLevels);
         
-        for (let a = 0; a < auraLevels; a++) {
+        for (let a = 0; a < numRings; a++) {
             let auraHue = (this.baseHue + a * 75 + (visualSuperScale * 12)) % 360;
             let auraColor = this.hslToColorInt(auraHue / 360, 1.0, 0.65);
             
@@ -2039,6 +2053,10 @@ class ScubaFlowScene extends Phaser.Scene {
             let auraR = baseR + visualSuperScale * 1.5;
             
             let auraAlpha = 0.22 + pulse * 0.35 - a * 0.04;
+            if (a >= Math.floor(auraLevels)) {
+                let ringFrac = auraLevels - Math.floor(auraLevels);
+                auraAlpha *= ringFrac;
+            }
             if (visualSuperScale > 0) {
                 auraAlpha = Math.min(0.9, auraAlpha + visualSuperScale * 0.04);
             }
@@ -2358,52 +2376,73 @@ class ScubaFlowScene extends Phaser.Scene {
             bottomPoints.push({ x: x, y: cBottom });
         }
 
-        // Draw beam as layered sub-polygons for smooth alpha fadeout at tip
-        // Each layer covers origin → cutoff%, with alpha decreasing per layer
-        let baseMainAlpha = (0.16 + (this.visualMultiplier - 1) * 0.02) * intensity;
-        let baseCoreAlpha = (0.08 + (this.visualMultiplier - 1) * 0.01) * intensity;
-        let fadeSlices = [
-            { cutoff: 1.00, mainMul: 0.25, coreMul: 0.20 },
-            { cutoff: 0.75, mainMul: 0.30, coreMul: 0.25 },
-            { cutoff: 0.50, mainMul: 0.55, coreMul: 0.45 },
-            { cutoff: 0.25, mainMul: 0.75, coreMul: 0.65 },
-        ];
+        // Continuous gradual light progression from origin to tip
+        // Smooth monotonic attenuation with zero-slope feathered dissipation at beam limits
+        let peakMainAlpha = (0.28 + (this.visualMultiplier - 1) * 0.03) * intensity;
+        let peakCoreAlpha = (0.14 + (this.visualMultiplier - 1) * 0.015) * intensity;
+        let coreCutoff = 0.72;
 
-        for (let s = 0; s < fadeSlices.length; s++) {
-            let slice = fadeSlices[s];
-            let lastStep = Math.floor(slice.cutoff * steps);
+        let tMain = (t) => {
+            if (t <= 0) return 1;
+            if (t >= 1) return 0;
+            let u = 1 - t * t;
+            return u * u;
+        };
 
-            // Main beam slice
-            g.fillStyle(lightCol, baseMainAlpha * slice.mainMul);
-            g.beginPath();
-            g.moveTo(x0, y0);
-            for (let i = 0; i <= lastStep; i++) g.lineTo(topPoints[i].x, topPoints[i].y);
-            for (let i = lastStep; i >= 0; i--) g.lineTo(bottomPoints[i].x, bottomPoints[i].y);
-            g.closePath();
-            g.fillPath();
+        let tCore = (t) => {
+            if (t <= 0) return 1;
+            if (t >= coreCutoff) return 0;
+            let u = 1 - Math.pow(t / coreCutoff, 2);
+            return u * u;
+        };
 
-            // Core beam slice
-            g.fillStyle(0xffffff, baseCoreAlpha * slice.coreMul);
-            g.beginPath();
-            g.moveTo(x0, y0);
-            for (let i = 0; i <= lastStep; i++) {
-                let coreTop = topPoints[i].y * 0.45 + y0 * 0.55;
-                g.lineTo(topPoints[i].x, coreTop);
+        // Render 10 progressive nested slices (sampled along the 30 boundary steps)
+        // Eliminates redundant mobile fill-rate overdraw while preserving smooth polynomial falloff
+        let numSlices = 10;
+        for (let s = 1; s <= numSlices; s++) {
+            let tPrev = (s - 1) / numSlices;
+            let tCurr = s / numSlices;
+            let k = Math.min(steps, Math.round(s * (steps / numSlices)));
+
+            let wMain = tMain(tPrev) - tMain(tCurr);
+            if (wMain > 0.0001) {
+                g.fillStyle(lightCol, peakMainAlpha * wMain);
+                g.beginPath();
+                g.moveTo(x0, y0);
+                for (let i = 0; i <= k; i++) g.lineTo(topPoints[i].x, topPoints[i].y);
+                for (let i = k; i >= 0; i--) g.lineTo(bottomPoints[i].x, bottomPoints[i].y);
+                g.closePath();
+                g.fillPath();
             }
-            for (let i = lastStep; i >= 0; i--) {
-                let coreBottom = bottomPoints[i].y * 0.45 + y0 * 0.55;
-                g.lineTo(topPoints[i].x, coreBottom);
+
+            let wCore = tCore(tPrev) - tCore(tCurr);
+            if (wCore > 0.0001) {
+                g.fillStyle(0xffffff, peakCoreAlpha * wCore);
+                g.beginPath();
+                g.moveTo(x0, y0);
+                for (let i = 0; i <= k; i++) {
+                    let coreTop = topPoints[i].y * 0.45 + y0 * 0.55;
+                    g.lineTo(topPoints[i].x, coreTop);
+                }
+                for (let i = k; i >= 0; i--) {
+                    let coreBottom = bottomPoints[i].y * 0.45 + y0 * 0.55;
+                    g.lineTo(topPoints[i].x, coreBottom);
+                }
+                g.closePath();
+                g.fillPath();
             }
-            g.closePath();
-            g.fillPath();
         }
 
-        // Draw luminous lamp bulb lens glow
+        // Draw luminous lamp bulb lens glow with gradual optical bloom
         if (typeof g.fillCircle === 'function') {
-            g.fillStyle(0xffffff, 0.45 * intensity);
-            g.fillCircle(x0, y0, 3.5);
-            g.fillStyle(lightCol, 0.22 * intensity);
-            g.fillCircle(x0, y0, 9.0);
+            g.fillStyle(0xffffff, 0.60 * intensity);
+            g.fillCircle(x0, y0, 2.5);
+            g.fillStyle(0xffffff, 0.32 * intensity);
+            g.fillCircle(x0, y0, 5.5);
+            g.fillStyle(lightCol, 0.20 * intensity);
+            g.fillCircle(x0, y0, 9.5);
+            g.fillStyle(lightCol, 0.08 * intensity);
+            g.fillCircle(x0, y0, 14.5);
         }
 
 
@@ -2499,12 +2538,9 @@ class ScubaFlowScene extends Phaser.Scene {
         let g = this.terrainGraphics;
         g.clear();
 
-        let activeZone = this.getCurrentDepthZone();
-        let baseFloorHue = activeZone ? (activeZone.floorHue !== undefined ? activeZone.floorHue : Phaser.Display.Color.IntegerToColor(activeZone.floorColor).h * 360) : 280;
-        let baseCeilHue = activeZone ? (activeZone.ceilHue !== undefined ? activeZone.ceilHue : Phaser.Display.Color.IntegerToColor(activeZone.ceilColor).h * 360) : 180;
-
-        let floorHue = (baseFloorHue + this.baseHue * 0.5) % 360;
-        let ceilHue = (baseCeilHue + this.baseHue * 0.5) % 360;
+        let zoneHues = this.getCurrentZoneHues();
+        let floorHue = (zoneHues.floorHue + this.wallHueOffset) % 360;
+        let ceilHue = (zoneHues.ceilHue + this.wallHueOffset) % 360;
 
         // Dynamic flow-state color popping based on silt-free multiplier
         let flowSat = this.siltActive ? 0.15 : Math.min(1.0, 0.45 + (this.visualMultiplier - 1) * 0.08);
@@ -2638,6 +2674,7 @@ class ScubaFlowScene extends Phaser.Scene {
                 this.drawRockCrack(g, cx, ceilY, false, ceilColor, seed, flowFill);
             }
         }
+
 
         // --- Draw Wall Openings (cracks & windows as overlays on top of the terrain) ---
         this.drawWallOpenings(g, startX, endX, floorColor, ceilColor, flowFill, flowSat, flowLightBoost, floorHue, ceilHue);
@@ -2778,13 +2815,17 @@ class ScubaFlowScene extends Phaser.Scene {
 
             if (onFloor) {
                 // Crack / side-tunnel opening IN the floor wall
-                // Shape: an irregular arch-like notch cut into the floor surface
-                let baseY = floorY;       // surface of floor at cx
                 let leftX = cx - ow / 2;
                 let rightX = cx + ow / 2;
-                let deepY = baseY + od;   // bottom of the pocket (into rock)
+                // Sample floor across full opening width; take max Y (deepest into rock)
+                // so the base edge never floats above the terrain poly on either side.
+                let baseY = Math.max(
+                    this.getWallY(leftX).floorY,
+                    floorY,
+                    this.getWallY(rightX).floorY
+                );
+                let deepY = baseY + od;
 
-                // Jagged interior polygon with 5 control points for crack feel
                 let r1 = this._seededRnd(slot * 67 + 2);
                 let r2 = this._seededRnd(slot * 71 + 4);
                 let r3 = this._seededRnd(slot * 79 + 6);
@@ -2792,7 +2833,6 @@ class ScubaFlowScene extends Phaser.Scene {
                 let midX2 = leftX + ow * (0.6 + r2 * 0.15);
                 let peakY = baseY + od * (0.45 + r3 * 0.35);
 
-                // Window: fill with far parallax depth colour
                 if (isWindow) {
                     g.fillStyle(farColor, 0.55 + farAlpha);
                     g.beginPath();
@@ -2805,7 +2845,6 @@ class ScubaFlowScene extends Phaser.Scene {
                     g.fillPath();
                 }
 
-                // Dark rock interior
                 g.fillStyle(0x010208, isWindow ? 0.0 : 0.90);
                 g.beginPath();
                 g.moveTo(leftX, baseY);
@@ -2816,7 +2855,6 @@ class ScubaFlowScene extends Phaser.Scene {
                 g.closePath();
                 g.fillPath();
 
-                // Rim glow stroke
                 g.lineStyle(1.2 + flowFill * 0.8, rimColor, 0.45 + flowFill * 0.3);
                 g.beginPath();
                 g.moveTo(leftX, baseY);
@@ -2828,10 +2866,16 @@ class ScubaFlowScene extends Phaser.Scene {
 
             } else {
                 // Crack / side-tunnel opening IN the ceiling wall
-                let baseY = ceilY;        // surface of ceiling at cx
                 let leftX = cx - ow / 2;
                 let rightX = cx + ow / 2;
-                let deepY = baseY - od;   // top of the pocket (into rock above)
+                // Sample ceiling across full opening width; take min Y (deepest into rock upward)
+                // so the base edge never drops below the terrain poly on either side.
+                let baseY = Math.min(
+                    this.getWallY(leftX).ceilY,
+                    ceilY,
+                    this.getWallY(rightX).ceilY
+                );
+                let deepY = baseY - od;
 
                 let r1 = this._seededRnd(slot * 83 + 9);
                 let r2 = this._seededRnd(slot * 89 + 11);
@@ -3119,6 +3163,7 @@ class ScubaFlowScene extends Phaser.Scene {
 
         // Shift baseHue complementary (120 degrees) on each bump to dramatically shift the visual color palette
         this.baseHue = (this.baseHue + 120) % 360;
+        this.wallHueOffset = (this.wallHueOffset + 60) % 360;
 
         if (!this.siltActive) {
             this.siltActive = true;
@@ -3307,7 +3352,9 @@ class ScubaFlowScene extends Phaser.Scene {
 
         // Beat pulse scaled by multiplier and local energy — organic rhythmic cave expansion
         let multiBeatScale = 1.0 + (this.visualMultiplier - 1) * 0.4;
-        let energyFactor = 0.25 + localEnergy * 0.85;
+        let energyFactor = localEnergy < 0.08
+            ? (localEnergy / 0.08) * 0.12
+            : 0.12 + (localEnergy - 0.08) * 0.95;
         let beatPulseOffset = (this.currentBeatPulse || 0) * 8.5 * energyFactor * multiBeatScale;
 
         // Dynamic extra-wide and smooth start zone from spawn up to 750px
@@ -3351,6 +3398,42 @@ class ScubaFlowScene extends Phaser.Scene {
             }
         }
         return zones[0];
+    }
+
+    getCurrentZoneHues() {
+        let zones = this.levelData && this.levelData.zones;
+        if (!zones || zones.length === 0) return { floorHue: 280, ceilHue: 180 };
+
+        let t = this.elapsedTime || 0;
+        let zIdx = 0;
+        for (let i = 0; i < zones.length; i++) {
+            if (t >= zones[i].startTime && t <= zones[i].endTime) {
+                zIdx = i;
+                break;
+            }
+            if (t > zones[i].endTime) zIdx = i;
+        }
+
+        let lerpHue = (h1, h2, p) => {
+            let diff = (h2 - h1 + 540) % 360 - 180;
+            return (h1 + diff * p + 360) % 360;
+        };
+
+
+        let curr = zones[zIdx];
+        if (zIdx === 0) return { floorHue: curr.floorHue, ceilHue: curr.ceilHue };
+
+        let elapsed = t - curr.startTime;
+        let transWindow = 4000; // 4s fade-in on zone entry
+        if (elapsed >= transWindow) return { floorHue: curr.floorHue, ceilHue: curr.ceilHue };
+
+        let prev = zones[zIdx - 1];
+        let ease = elapsed / transWindow;
+        ease = ease * ease * (3 - 2 * ease); // smoothstep
+        return {
+            floorHue: lerpHue(prev.floorHue, curr.floorHue, ease),
+            ceilHue: lerpHue(prev.ceilHue, curr.ceilHue, ease)
+        };
     }
 
 
@@ -3884,11 +3967,13 @@ class ScubaFlowScene extends Phaser.Scene {
         this.score = 0;
         this.pointsScore = 0;
         this.scoreMultiplier = 1;
+        this.smoothVisualMultiplier = 1.0;
         this.comboCount = 0;
         this.flowMeter = 1.0;
         this.auraRings = 0;
         this.elapsedTime = 0;
         this.baseHue = 0;
+        this.wallHueOffset = 0;
         this.musicCompleted = false;
         this.isFadingOut = false;
         this.isLevelCompleted = false;
@@ -4180,6 +4265,9 @@ class ScubaFlowScene extends Phaser.Scene {
             if (e > maxRawEnergy) maxRawEnergy = e;
         }
 
+        let averageEnergy = rawEnergy.reduce((a, b) => a + b, 0) / rawEnergy.length;
+        let isCalmTrack = averageEnergy < 0.08;
+
         // Sub-bass Kick, Acoustic Percussion & Vocal Transient Extraction (Dual-stream)
         let beatWindowSec = 0.08; // 80ms windowing
         let beatChunkSize = Math.floor(sampleRate * beatWindowSec);
@@ -4211,8 +4299,11 @@ class ScubaFlowScene extends Phaser.Scene {
 
         let beats = [];
         let lastBeatTime = -9999;
-        let absoluteBeatThreshold = 0.008; // Ignore quiet background hiss while capturing acoustic nuances
-        let localWindow = 14; // ~1.1s local window for adaptive onset thresholding
+        // Calm choral tracks pulse with musical phrases; energetic tracks track fast kicks
+        let absoluteBeatThreshold = isCalmTrack ? 0.013 : 0.008;
+        let localWindow = isCalmTrack ? 20 : 14;
+        let onsetMultiplier = isCalmTrack ? 1.38 : 1.25;
+        let minBeatGap = isCalmTrack ? 350 : 160;
 
         for (let i = 1; i < rawBeats.length - 1; i++) {
             if (rawBeats[i] > rawBeats[i - 1] && rawBeats[i] > rawBeats[i + 1]) {
@@ -4226,10 +4317,9 @@ class ScubaFlowScene extends Phaser.Scene {
                 }
                 let localAvg = localSum / (localCount || 1);
                 // Must exceed adaptive local onset average AND minimum noise threshold
-                if (rawBeats[i] > localAvg * 1.25 && rawBeats[i] > absoluteBeatThreshold) {
+                if (rawBeats[i] > localAvg * onsetMultiplier && rawBeats[i] > absoluteBeatThreshold) {
                     let beatTime = i * beatWindowSec * 1000;
-                    // Debouncer: Enforce minimum 160ms gap between visual beats (supports rapid double bass / up to 375 BPM)
-                    if (beatTime - lastBeatTime >= 160) {
+                    if (beatTime - lastBeatTime >= minBeatGap) {
                         beats.push(beatTime);
                         lastBeatTime = beatTime;
                     }
@@ -4244,8 +4334,6 @@ class ScubaFlowScene extends Phaser.Scene {
                 beats.push(t);
             }
         }
-
-        let averageEnergy = rawEnergy.reduce((a, b) => a + b, 0) / rawEnergy.length;
 
         let yDepthMin = 150;
         let yDepthMax = 550;
@@ -4413,15 +4501,16 @@ class ScubaFlowScene extends Phaser.Scene {
         // Vivid Neon Psychedelic Zones
         let zoneNames = ["Neon Reef", "Solar Ridge", "Ultraviolet Cavern", "Molten Abyss", "Cyber Ascent"];
         let zoneColors = [
-            { floor: 0x00ff88, ceil: 0x00f0ff, bg: 0x010c14 }, // Electric emerald & cyan
-            { floor: 0xffcc00, ceil: 0xff00b4, bg: 0x0e0212 }, // Solar gold & neon magenta
-            { floor: 0xff007f, ceil: 0x4b0082, bg: 0x12010c }, // Hot pink & deep indigo
-            { floor: 0xff6600, ceil: 0x9900ff, bg: 0x120501 }, // Bright amber orange & electric violet
-            { floor: 0x00ffff, ceil: 0x008080, bg: 0x010d12 }  // Electric aqua & radiant turquoise
+            { floor: 0x00ff88, ceil: 0x00f0ff, floorHue: 152, ceilHue: 184, bg: 0x010c14 }, // Electric emerald & cyan
+            { floor: 0xffcc00, ceil: 0xff00b4, floorHue: 48, ceilHue: 318, bg: 0x0e0212 }, // Solar gold & neon magenta
+            { floor: 0xff007f, ceil: 0x4b0082, floorHue: 330, ceilHue: 275, bg: 0x12010c }, // Hot pink & deep indigo
+            { floor: 0xff6600, ceil: 0x9900ff, floorHue: 24, ceilHue: 276, bg: 0x120501 }, // Bright amber orange & electric violet
+            { floor: 0x00ffff, ceil: 0x008080, floorHue: 180, ceilHue: 180, bg: 0x010d12 }  // Electric aqua & radiant turquoise
         ];
 
         // Seed initial baseHue so different songs feature unique starting color accents
         this.baseHue = Math.floor(rng() * 360);
+        this.wallHueOffset = (this.baseHue * 0.5) % 360;
 
         let numZones = zoneNames.length;
         let zoneDuration = songLengthMs / numZones;
@@ -4439,8 +4528,8 @@ class ScubaFlowScene extends Phaser.Scene {
             }
             let avgDepth = countY > 0 ? (sumY / countY) : 300;
 
-            let fHue = Phaser.Display.Color.IntegerToColor(zoneColors[z].floor).h * 360;
-            let cHue = Phaser.Display.Color.IntegerToColor(zoneColors[z].ceil).h * 360;
+            let fHue = zoneColors[z].floorHue;
+            let cHue = zoneColors[z].ceilHue;
             zones.push({
                 startTime: startTime,
                 endTime: endTime,
@@ -4730,15 +4819,23 @@ class ScubaFlowScene extends Phaser.Scene {
         this.clusterTotals = originalClusterTotals;
         this.clusterCollected = originalClusterCollected;
 
-        // Test 12: Flashlight Clamping and Occlusion boundaries
+        // Test 12: Flashlight Clamping, Occlusion boundaries, and Gradual Attenuation
+        let recordedSliceAlphas = [];
+        let curAlpha = 0;
         let mockG = {
-            clear: () => {}, lineStyle: () => {}, fillStyle: () => {},
+            clear: () => {}, lineStyle: () => {},
+            fillStyle: (col, alpha) => { curAlpha = alpha; },
             beginPath: () => {}, moveTo: () => {}, lineTo: () => {},
-            closePath: () => {}, fillPath: () => {}, strokePath: () => {},
+            closePath: () => {},
+            fillPath: () => { recordedSliceAlphas.push(curAlpha); },
+            strokePath: () => {},
             fillCircle: () => {}
         };
         let testLight = this.drawDiveLight(mockG, 100, 250, 1, 0xffffff, 0xff00ff, 0.5);
-        console.assert(testLight !== undefined && testLight.topPoints.length > 0, "Assertion Failed: drawDiveLight must return topPoints");
+        console.assert(testLight !== undefined && testLight.topPoints.length === 31, "Assertion Failed: drawDiveLight must return 31 topPoints");
+        console.assert(recordedSliceAlphas.length >= 10 && recordedSliceAlphas.length <= 20, "Assertion Failed: drawDiveLight must render optimized progressive slices");
+        let lastSliceAlpha = recordedSliceAlphas[recordedSliceAlphas.length - 1];
+        console.assert(lastSliceAlpha !== undefined && lastSliceAlpha < 0.01, "Assertion Failed: Torch light must feather to near-zero at outer range");
         for (let i = 0; i < testLight.topPoints.length; i++) {
             let ptTop = testLight.topPoints[i];
             let ptBottom = testLight.bottomPoints[i];
@@ -4806,6 +4903,9 @@ class ScubaFlowScene extends Phaser.Scene {
             console.assert(activeFX.causticIntensity !== undefined, "Assertion Failed: PsychedelicFX must have causticIntensity uniform");
             console.assert(activeFX.fxTime !== undefined, "Assertion Failed: PsychedelicFX must have fxTime uniform");
         }
+        if (this.bubbleEmitter && this.bubbleEmitter.ops && this.bubbleEmitter.ops.scaleX) {
+            console.assert(this.bubbleEmitter.ops.scaleX.start === 0.10 && this.bubbleEmitter.ops.scaleX.end === 0.42, "Assertion Failed: Bubble emitter must use varied scale range [0.10, 0.42]");
+        }
 
         // Test 17: Diver Horizontal Trim
         if (this.buddy) {
@@ -4851,12 +4951,23 @@ class ScubaFlowScene extends Phaser.Scene {
         if (zones && zones.length === 5) {
             console.assert(zones[0].name === "Neon Reef", "Assertion Failed: Zone 0 must be Neon Reef");
             console.assert(zones[3].name === "Molten Abyss", "Assertion Failed: Zone 3 must be Molten Abyss");
+            let savedTime = this.elapsedTime;
+            this.elapsedTime = 0;
+            let huesStart = this.getCurrentZoneHues();
+            this.elapsedTime = zones[0].endTime - 100;
+            let huesTransition = this.getCurrentZoneHues();
+            this.elapsedTime = savedTime;
+            console.assert(huesStart && typeof huesStart.floorHue === 'number', "Assertion Failed: getCurrentZoneHues must return floorHue");
+            console.assert(huesTransition && huesTransition.floorHue !== huesStart.floorHue, "Assertion Failed: Zone hues must smoothly interpolate near boundary");
         }
 
         // Test 18: Lifecycle Methods & Teardown definitions
         console.assert(typeof this.exitToTrackSelect === 'function', "Assertion Failed: exitToTrackSelect must be a function");
         console.assert(typeof this.restartDive === 'function', "Assertion Failed: restartDive must be a function");
         console.assert(typeof this.stopAllAudio === 'function', "Assertion Failed: stopAllAudio must be a function");
+        console.assert(typeof this.smoothVisualMultiplier === 'number', "Assertion Failed: smoothVisualMultiplier must be initialized");
+        let calmWallOffsets = this.getWallOffsets(1500, 0.04);
+        console.assert(calmWallOffsets && typeof calmWallOffsets.floorOffset === 'number', "Assertion Failed: getWallOffsets must return valid numbers for calm track energy");
 
         console.log("=== DIAGNOSTICS PASSED: ALL CONTROLS FUNCTIONAL ===");
     }
