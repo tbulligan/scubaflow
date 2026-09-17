@@ -4064,5 +4064,16 @@ function startGame() {
         },
         scene: [ScubaFlowScene]
     };
-    new Phaser.Game(config);
+    window.game = new Phaser.Game(config);
+
+    const refreshScale = () => {
+        if (window.game && window.game.scale) {
+            window.game.scale.refresh();
+        }
+    };
+    window.addEventListener('resize', refreshScale);
+    window.addEventListener('orientationchange', () => {
+        setTimeout(refreshScale, 150);
+        setTimeout(refreshScale, 400);
+    });
 }
