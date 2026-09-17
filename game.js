@@ -376,6 +376,7 @@ class ScubaFlowScene extends Phaser.Scene {
         // 6. Setup Graphics layers
         this.parallaxFarGraphics = this.add.graphics().setDepth(-2).setScrollFactor(0);  // farthest layer (slowest) — screen-space so it tiles left correctly
         this.parallaxNearGraphics = this.add.graphics().setDepth(-1); // near layer (faster)
+        this.backwallGraphics = this.add.graphics().setDepth(-0.5); // recessed 2.5D cavern backwall connecting floor & ceiling
         this.backgroundGraphics = this.add.graphics();
         this.terrainGraphics = this.add.graphics();
         this.guideLineGraphics = this.add.graphics().setDepth(1);
@@ -390,6 +391,7 @@ class ScubaFlowScene extends Phaser.Scene {
             .setAlpha(0)
             .setVisible(false);
         this.foregroundGraphics = this.add.graphics().setDepth(20).setScrollFactor(0); // foreground bubble layer
+        this.foregroundRockGraphics = this.add.graphics().setDepth(22).setScrollFactor(0); // near-field foreground rock silhouettes
         this.foregroundBubbles = [];
         for (let i = 0; i < 6; i++) {
             this.foregroundBubbles.push({
@@ -500,20 +502,25 @@ class ScubaFlowScene extends Phaser.Scene {
                             this.spawnCollectibles();
                             console.log("Collectibles spawned.");
 
-                            // Initialize Bioluminescent Marine Snow Motes (150 world-space motes)
+                            // Initialize Bioluminescent Marine Snow Motes (150 world-space motes with 3D Z-depth)
                             let startCamX = this.cameras.main.scrollX;
                             this.marineSnowMotes = [];
                             for (let i = 0; i < 150; i++) {
+                                let z = 0.35 + Math.random() * 1.65;
+                                let baseR = 0.9 + Math.random() * 1.3;
                                 this.marineSnowMotes.push({
                                     x: startCamX + Math.random() * 1200,
                                     y: Math.random() * 700,
+                                    z: z,
                                     vx: -12 - Math.random() * 14,
                                     vy: -4 + Math.random() * 8,
-                                    size: 1.0 + Math.random() * 1.5,
+                                    baseSize: baseR,
+                                    size: baseR,
                                     alpha: 0.05
                                 });
                             }
                             this.marineSnowGraphics = this.add.graphics().setDepth(-1.5).setScrollFactor(1);
+                            this.marineSnowForegroundGraphics = this.add.graphics().setDepth(15).setScrollFactor(1);
 
                             // Set camera to follow player
                             this.cameras.main.startFollow(this.player, true, 0.1, 1, -250, 0);
@@ -528,6 +535,7 @@ class ScubaFlowScene extends Phaser.Scene {
                             let ignoreList = [
                                 this.parallaxFarGraphics,
                                 this.parallaxNearGraphics,
+                                this.backwallGraphics,
                                 this.backgroundGraphics,
                                 this.terrainGraphics,
                                 this.guideLineGraphics,
@@ -535,7 +543,9 @@ class ScubaFlowScene extends Phaser.Scene {
                                 this.siltOverlay,
                                 this.siltVignetteImage,
                                 this.foregroundGraphics,
+                                this.foregroundRockGraphics,
                                 this.marineSnowGraphics,
+                                this.marineSnowForegroundGraphics,
                                 this.player,
                                 this.buddy,
                                 this.bubbleEmitter,
@@ -826,6 +836,7 @@ class ScubaFlowScene extends Phaser.Scene {
                 this.drawPlayerVisuals(time);
                 this.drawBuddyVisuals(time);
                 this.drawForegroundBubbles(delta / 1000);
+                this.drawForegroundRocks(delta / 1000);
                 this.drawSiltOverlay();
 
                 let fx = this.cameras.main.getPostPipeline(PsychedelicFX);
@@ -1323,6 +1334,7 @@ class ScubaFlowScene extends Phaser.Scene {
             this.drawPlayerVisuals(time);
             this.drawBuddyVisuals(time);
             this.drawForegroundBubbles(delta / 1000);
+            this.drawForegroundRocks(delta / 1000);
             this.drawSiltOverlay();
 
             // 11. Check Collectibles steering
@@ -1578,9 +1590,11 @@ class ScubaFlowScene extends Phaser.Scene {
     }
 
     updateMarineSnow(dt) {
-        let g = this.marineSnowGraphics;
-        if (!g) return;
-        g.clear();
+        let gBack = this.marineSnowGraphics;
+        let gFore = this.marineSnowForegroundGraphics || gBack;
+        if (!gBack) return;
+        gBack.clear();
+        if (gFore && gFore !== gBack) gFore.clear();
         if (!this.player || !this.buddy) return;
 
         let camX = this.cameras.main.scrollX;
@@ -1599,8 +1613,11 @@ class ScubaFlowScene extends Phaser.Scene {
         }
 
         for (let mote of this.marineSnowMotes) {
-            mote.x += mote.vx * dt * speedMultiplier;
-            mote.y += mote.vy * dt * speedMultiplier;
+            let z = mote.z || 1.0;
+            let invZ = 1.0 / z;
+
+            mote.x += mote.vx * dt * speedMultiplier * invZ;
+            mote.y += mote.vy * dt * speedMultiplier * Math.sqrt(invZ);
 
             // Wrap relative to camera viewport in world space (with 100px padding off-screen)
             if (mote.x < camX - 100) {
@@ -1692,15 +1709,21 @@ class ScubaFlowScene extends Phaser.Scene {
                 color = isSuper ? 0x38bdf8 : 0x475569;
             }
 
-            g.fillStyle(color, mote.alpha);
+            // Perspective size & target graphics selection
+            let baseR = mote.baseSize || mote.size || 1.2;
+            let renderSize = Math.max(0.4, baseR * invZ);
+            let g = (z < 0.85 && gFore) ? gFore : gBack;
+            let zAlphaMult = (z < 0.85) ? Math.min(1.2, 0.75 + (1.0 - z) * 0.6) : 1.0;
+
+            g.fillStyle(color, mote.alpha * zAlphaMult);
             if (currentVisMult >= 9.2) {
                 // Motion blur effect: smoothly stretch snow particles horizontally into speed lines
                 let blurFrac = Math.min(1.0, (currentVisMult - 9.2) / 0.8);
                 let visualSuperScale = Math.max(0, Math.min(6, currentVisMult - 9));
-                let streakLength = mote.size * (1.0 + blurFrac * (3.0 + visualSuperScale * 6.0));
-                g.fillRect(mote.x - streakLength, mote.y - mote.size * 0.9, streakLength * 2, mote.size * 1.8);
+                let streakLength = renderSize * (1.0 + blurFrac * (3.0 + visualSuperScale * 6.0));
+                g.fillRect(mote.x - streakLength, mote.y - renderSize * 0.9, streakLength * 2, renderSize * 1.8);
             } else {
-                g.fillCircle(mote.x, mote.y, mote.size);
+                g.fillCircle(mote.x, mote.y, renderSize);
             }
         }
     }
@@ -2014,6 +2037,72 @@ class ScubaFlowScene extends Phaser.Scene {
             fg.strokeCircle(b.x, b.y, b.radius);
             fg.fillStyle(0xffffff, b.alpha * 1.8);
             fg.fillCircle(b.x - b.radius * 0.35, b.y - b.radius * 0.35, Math.max(1.2, b.radius * 0.22));
+        }
+    }
+
+    drawForegroundRocks(dt) {
+        let fg = this.foregroundRockGraphics;
+        if (!fg) return;
+        fg.clear();
+
+        let camX = this.cameras.main.scrollX;
+        let screenW = 1300;
+        let fgFactor = 1.35; // 35% faster scroll than camera for near-field parallax
+        let fgSpacing = 440;
+        let fgPhase = (camX * fgFactor) % fgSpacing;
+        let fgCount = Math.ceil(screenW / fgSpacing) + 2;
+
+        let zoneHues = this.getCurrentZoneHues();
+        let rimHue = (zoneHues.ceilHue + 40) % 360;
+        let rimColor = this.hslToColorInt(rimHue / 360, 0.70, 0.55);
+        let darkRockColor = 0x01040a; // Pitch-black deep-sea foreground rock silhouette
+
+        for (let n = -1; n <= fgCount; n++) {
+            let sx = n * fgSpacing - fgPhase;
+            let i = Math.floor((camX * fgFactor + sx + fgPhase) / fgSpacing);
+            let jitterX = Math.sin(i * 5.7) * 70;
+            sx += jitterX;
+
+            // Only spawn foreground formation if pseudo-random check passes (leaves natural gaps)
+            let candidateCheck = Math.sin(i * 3.1 + 1.7);
+            if (candidateCheck < -0.15) continue;
+
+            let isStalactite = (i % 2 === 0);
+            let hw = 28 + Math.sin(i * 4.3) * 12;
+
+            if (isStalactite) {
+                // Large jagged foreground stalactite hanging from top
+                let stalH = 75 + Math.sin(i * 2.7) * 40;
+                fg.fillStyle(darkRockColor, 0.88);
+                fg.lineStyle(1.8, rimColor, 0.35);
+                fg.beginPath();
+                fg.moveTo(sx - hw * 1.4, -20);
+                fg.lineTo(sx - hw * 0.4, stalH * 0.4);
+                fg.lineTo(sx - 4, stalH * 0.85);
+                fg.lineTo(sx, stalH);
+                fg.lineTo(sx + 6, stalH * 0.75);
+                fg.lineTo(sx + hw * 0.5, stalH * 0.35);
+                fg.lineTo(sx + hw * 1.4, -20);
+                fg.closePath();
+                fg.fillPath();
+                fg.strokePath();
+            } else {
+                // Large jagged foreground stalagmite rising from bottom
+                let stagH = 65 + Math.sin(i * 2.1) * 35;
+                fg.fillStyle(darkRockColor, 0.88);
+                fg.lineStyle(1.8, rimColor, 0.35);
+                fg.beginPath();
+                fg.moveTo(sx - hw * 1.4, 720);
+                fg.lineTo(sx - hw * 0.5, 700 - stagH * 0.35);
+                fg.lineTo(sx - 5, 700 - stagH * 0.8);
+                fg.lineTo(sx, 700 - stagH);
+                fg.lineTo(sx + 5, 700 - stagH * 0.7);
+                fg.lineTo(sx + hw * 0.4, 700 - stagH * 0.4);
+                fg.lineTo(sx + hw * 1.4, 720);
+                fg.closePath();
+                fg.fillPath();
+                fg.strokePath();
+            }
         }
     }
 
@@ -2581,7 +2670,54 @@ class ScubaFlowScene extends Phaser.Scene {
         let lineWidth = 1.5 + pulse * 2.0 + flowFill * 1.0; // thicker stroke at high flow
         let lineAlpha = 0.35 + pulse * 0.15 + flowFill * 0.45; // brighter neon edge at high flow
 
-        // Draw Floor
+        // --- 2.5D RECESSED CAVERN BACKWALL & CYLINDRICAL RIBS (Depth -0.5) ---
+        if (this.backwallGraphics && floorPoints.length > 1 && ceilPoints.length > 1) {
+            let bg = this.backwallGraphics;
+            bg.clear();
+
+            let backwallHue = (floorHue + 210) % 360;
+            let backwallColor = this.hslToColorInt(backwallHue / 360, 0.40, 0.035);
+            let backwallAlpha = this.siltActive ? 0.28 : Math.min(0.70, 0.45 + flowFill * 0.16);
+
+            // 1. Solid ambient backwall filling corridor between ceiling and floor
+            bg.fillStyle(backwallColor, backwallAlpha);
+            bg.beginPath();
+            bg.moveTo(ceilPoints[0].x, ceilPoints[0].y);
+            for (let i = 1; i < ceilPoints.length; i++) {
+                bg.lineTo(ceilPoints[i].x, ceilPoints[i].y);
+            }
+            for (let i = floorPoints.length - 1; i >= 0; i--) {
+                bg.lineTo(floorPoints[i].x, floorPoints[i].y);
+            }
+            bg.closePath();
+            bg.fillPath();
+
+            // 2. Vertical Cylindrical Sonar Ribs (Curved Strata bowing away into screen depth)
+            let ribSpacing = 160;
+            let firstRib = Math.floor(startX / ribSpacing) * ribSpacing;
+            let lastRib = Math.ceil(endX / ribSpacing) * ribSpacing;
+            let ribHue = (floorHue + 180) % 360;
+            let ribColor = this.hslToColorInt(ribHue / 360, 0.50, 0.08);
+            let ribAlpha = (0.10 + pulse * 0.10 + flowFill * 0.08);
+            bg.lineStyle(1.4, ribColor, ribAlpha);
+
+            for (let rx = firstRib; rx <= lastRib; rx += ribSpacing) {
+                let { floorY: rf, ceilY: rc } = this.getWallY(rx);
+                let midY = (rc + rf) * 0.5;
+                let bowX = rx + 18 + pulse * 4;
+                bg.beginPath();
+                bg.moveTo(rx, rc);
+                for (let t = 0.25; t <= 1.0; t += 0.25) {
+                    let it = 1 - t;
+                    let qx = it * it * rx + 2 * it * t * bowX + t * t * rx;
+                    let qy = it * it * rc + 2 * it * t * midY + t * t * rf;
+                    bg.lineTo(qx, qy);
+                }
+                bg.strokePath();
+            }
+        }
+
+        // Draw Floor (with 3D Shelf Bevel)
         // Fill: dark base at low flow, neon-tinted at high flow
         g.lineStyle(lineWidth, floorColor, lineAlpha);
         g.fillStyle(floorColor, flowFill * 0.72); // 0 = invisible (wireframe), 0.72 = solid neon
@@ -2595,7 +2731,18 @@ class ScubaFlowScene extends Phaser.Scene {
         g.fillPath();
         g.strokePath();
 
-        g.lineStyle(1.0, floorColor, (0.25 + flowFill * 0.35) * lineAlpha);
+        // 3D Floor Top-Shelf Ledge & Ambient Shadow
+        let floorShelfColor = this.hslToColorInt(floorHue / 360, wallSat * 0.9, Math.min(0.75, wallLum + 0.12));
+        g.lineStyle(1.2, floorShelfColor, (0.35 + flowFill * 0.40) * lineAlpha);
+        g.beginPath();
+        g.moveTo(floorPoints[0].x, floorPoints[0].y - 6);
+        for (let i = 1; i < floorPoints.length; i++) {
+            g.lineTo(floorPoints[i].x, floorPoints[i].y - 6);
+        }
+        g.strokePath();
+
+        // Ambient occlusion shadow under floor rim
+        g.lineStyle(1.0, floorColor, (0.20 + flowFill * 0.25) * lineAlpha);
         g.beginPath();
         g.moveTo(floorPoints[0].x, floorPoints[0].y + 6);
         for (let i = 1; i < floorPoints.length; i++) {
@@ -2603,7 +2750,7 @@ class ScubaFlowScene extends Phaser.Scene {
         }
         g.strokePath();
 
-        // Draw Ceiling
+        // Draw Ceiling (with 3D Under-Belly Overhang)
         g.lineStyle(lineWidth, ceilColor, lineAlpha);
         g.fillStyle(ceilColor, flowFill * 0.72);
         g.beginPath();
@@ -2616,7 +2763,18 @@ class ScubaFlowScene extends Phaser.Scene {
         g.fillPath();
         g.strokePath();
 
-        g.lineStyle(1.0, ceilColor, (0.25 + flowFill * 0.35) * lineAlpha);
+        // Ceiling underside ambient shadow
+        let ceilShadeColor = this.hslToColorInt(ceilHue / 360, wallSat * 0.8, Math.max(0.10, wallLum - 0.15));
+        g.lineStyle(1.2, ceilShadeColor, (0.30 + flowFill * 0.30) * lineAlpha);
+        g.beginPath();
+        g.moveTo(ceilPoints[0].x, ceilPoints[0].y + 6);
+        for (let i = 1; i < ceilPoints.length; i++) {
+            g.lineTo(ceilPoints[i].x, ceilPoints[i].y + 6);
+        }
+        g.strokePath();
+
+        // Upper ceiling rim
+        g.lineStyle(1.0, ceilColor, (0.22 + flowFill * 0.30) * lineAlpha);
         g.beginPath();
         g.moveTo(ceilPoints[0].x, ceilPoints[0].y - 6);
         for (let i = 1; i < ceilPoints.length; i++) {
@@ -4905,6 +5063,21 @@ class ScubaFlowScene extends Phaser.Scene {
         }
         if (this.bubbleEmitter && this.bubbleEmitter.ops && this.bubbleEmitter.ops.scaleX) {
             console.assert(this.bubbleEmitter.ops.scaleX.start === 0.10 && this.bubbleEmitter.ops.scaleX.end === 0.42, "Assertion Failed: Bubble emitter must use varied scale range [0.10, 0.42]");
+        }
+
+        // Test 18: 2.5D Layer Hierarchy & Perspective Marine Snow
+        if (this.backwallGraphics) {
+            console.assert(this.backwallGraphics.depth === -0.5, "Assertion Failed: backwallGraphics must be at depth -0.5");
+        }
+        if (this.foregroundRockGraphics) {
+            console.assert(this.foregroundRockGraphics.depth === 22, "Assertion Failed: foregroundRockGraphics must be at depth 22");
+        }
+        if (this.marineSnowForegroundGraphics) {
+            console.assert(this.marineSnowForegroundGraphics.depth === 15, "Assertion Failed: marineSnowForegroundGraphics must be at depth 15");
+        }
+        if (this.marineSnowMotes && this.marineSnowMotes.length > 0) {
+            let sampleMote = this.marineSnowMotes[0];
+            console.assert(typeof sampleMote.z === 'number' && sampleMote.z >= 0.2 && sampleMote.z <= 2.5, "Assertion Failed: Marine snow motes must have valid perspective depth z in [0.2, 2.5]");
         }
 
         // Test 17: Diver Horizontal Trim
