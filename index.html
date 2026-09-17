@@ -96,16 +96,6 @@
             touch-action: none;
         }
 
-        @media (min-width: 1201px) and (min-height: 701px) {
-            #game-container {
-                width: 1200px;
-                height: 700px;
-                border-radius: 16px;
-                border: 1px solid rgba(0, 240, 255, 0.12);
-                box-shadow: 0 0 60px rgba(0, 240, 255, 0.15);
-            }
-        }
-
         #game-container canvas {
             display: block;
             position: absolute !important;
@@ -289,7 +279,7 @@
 
         /* Floating Zero-HUD Quick Controls Dock */
         .quick-controls-dock {
-            position: absolute;
+            position: fixed;
             top: max(14px, env(safe-area-inset-top));
             right: max(14px, env(safe-area-inset-right));
             z-index: 90;
@@ -400,6 +390,77 @@
 
         .pause-button-group button {
             width: 100%;
+        }
+
+        /* Mobile Device Orientation Guard */
+        .rotate-device-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            height: 100dvh;
+            background: rgba(2, 5, 20, 0.94);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            z-index: 10000;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+            padding: 24px;
+            box-sizing: border-box;
+            pointer-events: all;
+        }
+
+        @media (orientation: portrait) and (max-width: 900px) and (hover: none) and (pointer: coarse),
+               (orientation: portrait) and (max-device-width: 900px) {
+            .rotate-device-overlay {
+                display: flex;
+            }
+        }
+
+        .rotate-card {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            max-width: 320px;
+        }
+
+        .rotate-icon-wrapper {
+            width: 56px;
+            height: 56px;
+            margin-bottom: 20px;
+            color: #00f0ff;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            animation: rotatePromptPulse 2.5s ease-in-out infinite;
+        }
+
+        .rotate-phone-icon {
+            width: 48px;
+            height: 48px;
+            animation: rotatePhoneAnim 2.5s ease-in-out infinite;
+        }
+
+        @keyframes rotatePhoneAnim {
+            0%, 20% { transform: rotate(0deg); }
+            50%, 70% { transform: rotate(90deg); }
+            90%, 100% { transform: rotate(0deg); }
+        }
+
+        @keyframes rotatePromptPulse {
+            0%, 100% { filter: drop-shadow(0 0 8px rgba(0, 240, 255, 0.4)); }
+            50% { filter: drop-shadow(0 0 20px rgba(0, 240, 255, 0.85)); }
+        }
+
+        .rotate-desc {
+            font-size: 14px;
+            color: #94a3b8;
+            line-height: 1.5;
+            margin: 0;
         }
 
         /* Ambient floating bubbles in HTML background */
@@ -748,6 +809,20 @@
             </div>
         </div>
 
+        <!-- Mobile Device Orientation Guard -->
+        <div id="rotate-device-overlay" class="rotate-device-overlay" aria-hidden="true">
+            <div class="rotate-card">
+                <div class="rotate-icon-wrapper">
+                    <svg class="rotate-phone-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <rect x="5" y="2" width="14" height="20" rx="3" />
+                        <line x1="11" y1="18" x2="13" y2="18" />
+                    </svg>
+                </div>
+                <h3 class="glow-title" style="font-size: 20px; margin-bottom: 8px; letter-spacing: 1.5px;">ROTATE YOUR DEVICE</h3>
+                <p class="rotate-desc">ScubaFlow is designed for landscape. Rotate your phone for the best dive experience.</p>
+            </div>
+        </div>
+
         <!-- Interactive Start Overlay -->
         <div id="intro-screen">
             <div class="glass-card">
@@ -963,6 +1038,24 @@
 
         // Wire-up page start overlay trigger
         document.getElementById('btn-dive').addEventListener('click', () => {
+            // Auto-fullscreen & landscape lock for mobile on dive start (SOTA user gesture integration)
+            if (('ontouchstart' in window || navigator.maxTouchPoints > 0) && window.innerWidth <= 1024) {
+                let elem = document.documentElement;
+                let reqFs = elem.requestFullscreen || elem.webkitRequestFullscreen || elem.mozRequestFullScreen || elem.msRequestFullscreen;
+                if (reqFs) {
+                    let p = reqFs.call(elem);
+                    if (p && p.then) {
+                        p.then(() => {
+                            if (screen.orientation && screen.orientation.lock) {
+                                screen.orientation.lock('landscape').catch(() => {});
+                            }
+                        }).catch(() => {});
+                    } else if (screen.orientation && screen.orientation.lock) {
+                        screen.orientation.lock('landscape').catch(() => {});
+                    }
+                }
+            }
+
             // Create and resume AudioContext inside the user gesture stack to prevent decode hangs
             try {
                 let AudioContextClass = window.AudioContext || window.webkitAudioContext;

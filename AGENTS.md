@@ -85,6 +85,13 @@ For ScubaFlow:
   - Stops audio, tears down active Phaser game instance, and returns user seamlessly to `#intro-screen` with file uploader ready for a new track.
 - **Start Countdown Avatar Clarity:**
   - During countdown ("3, 2, 1"), player displays "YOU 🫧" and buddy displays "FOLLOW ME 👌" diegetic speech bubbles. Both hide automatically when "FLOW!" triggers.
+- **Mobile SOTA Auto-Fullscreen & Orientation Guard:**
+  - On "Begin Dive" button click, touch devices automatically request borderless fullscreen and attempt `screen.orientation.lock('landscape')`.
+  - Non-intrusive `#rotate-device-overlay` displays an animated rotating device prompt whenever a mobile device is in portrait orientation, vanishing instantly when rotated to landscape.
+- **Seamless Desktop Borderless Viewport:**
+  - `#game-container` fills 100% width and height without fixed 1200x700 box borders or glowing boxes in fullscreen / F11 mode.
+- **Unified Countdown & Dive Background Luminance:**
+  - `this.cameras.main.setBackgroundColor` initializes and synchronizes baseline luminance (`lightnessBoost = 0.012`) during start countdown and active gameplay, eliminating any brightness jumps when gameplay starts.
 
 ### Zero-HUD Diegetic Signals & Balance Mechanics
 Feedback physical + auditory:

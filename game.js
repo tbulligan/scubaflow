@@ -379,8 +379,11 @@ class ScubaFlowScene extends Phaser.Scene {
             });
         }
 
-        // Set camera bounds
+        // Set camera bounds & baseline background color
         this.cameras.main.setBounds(0, 0, 999999, 700);
+        let initBgHue = (this.baseHue * 0.25) % 360;
+        let initBgColor = this.hslToColorInt(initBgHue / 360, 0.7, 0.012);
+        this.cameras.main.setBackgroundColor(initBgColor);
 
         // 7. Decode Custom Track (Always required now)
         if (window.customAudioBuffer) {
@@ -688,6 +691,12 @@ class ScubaFlowScene extends Phaser.Scene {
                 this.V_lung = 0.5 + 0.3 * Math.sin(breathPhase * Math.PI * 2);
 
                 this.emitBreathingParticles();
+
+                // Maintain identical background luminance & snow motes during countdown as in active gameplay
+                let bgHue = (this.baseHue * 0.25) % 360;
+                let bgColorVal = this.hslToColorInt(bgHue / 360, 0.7, 0.012);
+                this.cameras.main.setBackgroundColor(bgColorVal);
+                this.updateMarineSnow(delta / 1000);
 
                 // Redraw visualizers and terrain so everything is visible
                 this.drawParallax(time);
@@ -3655,6 +3664,9 @@ class ScubaFlowScene extends Phaser.Scene {
         // Reset camera and master gain
         this.cameras.main.scrollX = 0;
         this.cameras.main.setAlpha(1);
+        let resetBgHue = (this.baseHue * 0.25) % 360;
+        let resetBgColor = this.hslToColorInt(resetBgHue / 360, 0.7, 0.012);
+        this.cameras.main.setBackgroundColor(resetBgColor);
         if (this.masterGain && this.audioContext) {
             this.masterGain.gain.cancelScheduledValues(this.audioContext.currentTime);
             this.masterGain.gain.setValueAtTime(0.95, this.audioContext.currentTime);
@@ -4324,6 +4336,13 @@ class ScubaFlowScene extends Phaser.Scene {
         // Test 13: Touch / Keyboard Dual Breathing Input
         let testSpaceDownState = this.isBreathingIn();
         console.assert(typeof testSpaceDownState === 'boolean', "Assertion Failed: isBreathingIn must return a boolean state");
+
+        // Test 14: Base Background Lighting Consistency
+        let testBgHue = (0 * 0.25) % 360;
+        let testBgColor = this.hslToColorInt(testBgHue / 360, 0.7, 0.012);
+        console.assert(typeof testBgColor === 'number' && testBgColor >= 0, "Assertion Failed: hslToColorInt must return valid color integer for base background");
+        let testColorObj = Phaser.Display.Color.IntegerToColor(testBgColor);
+        console.assert(testColorObj.r <= 10 && testColorObj.g <= 10 && testColorObj.b <= 10, "Assertion Failed: Base dive background must be dark (RGB <= 10)");
 
         console.log("=== DIAGNOSTICS PASSED: ALL CONTROLS FUNCTIONAL ===");
     }
