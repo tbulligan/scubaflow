@@ -43,8 +43,8 @@ For ScubaFlow:
 - **Master Dynamics Compressor**: Soft limiter (`DynamicsCompressorNode`, threshold `-18dB`, knee `12dB`, ratio `4:1`) inserted between master gain and audio destination, preventing collectible tones and silt rumbles from clipping or masking user music.
 - **Live Audio Reactivity & AnalyserNode**: Live 256-point FFT `AnalyserNode` connected downstream of silt lowpass filter. Features 3-tier acoustic signal routing:
   - **Sub-Bass Transient Flux** ($\Delta\text{Bass}^+ = \max(0, \text{Bass}_t - \text{Bass}_{t-1})$ with $e^{-14 \cdot dt}$ decay): Delivers punchy transient kicks to halogen torch bloom (`liveFlare`) and cleanly fuses with offline beat pulse (`currentBeatPulse`) with zero DC floor trapping (allowing physical cave walls to breathe and fully contract).
-  - **Sub-Bass DC Level** (Acoustic Pressure): Modulates 2.5D cavern backwall ambient grotto depth (`backwallAlpha`) and liquid micro-refraction wave time (`fx.fxTime`).
-  - **Audible Spectrum Energy** (Mids/Highs Bins 0-64): Drives WebGL dynamic water caustics shimmer (`fx.causticIntensity`) and marine snow bioluminescent glint (`audioGlint`).
+  - **Sub-Bass DC Level** (Acoustic Pressure): Modulates 2.5D cavern backwall ambient grotto depth (`backwallAlpha`) and drives monotonic liquid micro-refraction phase accumulation (`fx.fxTime`).
+  - **Audible Spectrum Energy** (Mids/Highs Bins 0-64): Drives lowpass-smoothed WebGL water caustics shimmer (`fx.causticIntensity`) and marine snow bioluminescent glint (`audioGlint`).
 
 ### Breath Physics & State Machine
 - Vertical motion via buoyancy + drag physics:
@@ -56,8 +56,7 @@ For ScubaFlow:
 
 ### Start Countdown Timer
 - 3.0s unified start sequence (four 750ms ticks: "3", "2", "1", "FLOW!"), displaying track title and duration overlay concurrently above countdown numbers. Eliminates dead-air delays.
-- Freeze player/buddy at start section, pause level time (`elapsedTime = 0`), render terrain during countdown.
-- **Flat Starting Zone:** Flat wide start zone (`introDuration = (750 / baseScrollSpeed) * 1000` ms, $750\text{px}$ from start) on centerline (Y=250). Player (spawn `x = 250`) and buddy (spawn `x = 550`) spawn safe without wall collision. Block collectibles before `introDuration`.
+- **Flat Starting Zone & Active Horizontal Trim:** Flat wide start zone (`introDuration = (750 / baseScrollSpeed) * 1000` ms, $750\text{px}$ from start) on centerline. Player spawns at $x = 250$ centered between corridor walls (`getPlayerCorridorCenterY(250)`) with neutral buoyancy (`V_lung = 0.5`, `buoyancySmooth = 0.5`, `vy = 0`, `rotation = 0`). Buddy spawns at $x = 530$ ($250 + 280\text{px}$ lead, `getBuddyTargetY(530, 0)`) facing forward (`scaleX = 1`, `rotation = 0`, `buddyState = 'normal'`). Diver limbs initialize and hold technical frog-kick glide trim (`updateDiverLimbs(0)`), completely eliminating position snapping or awkward frozen postures across countdown and level restarts. Block collectibles before `introDuration`.
 - Visual ticks play procedural audio tone chirps via `AudioContext` oscillators. Audio engine + gameplay start after countdown.
 
 ### Autopilot & Music Visualizer Mode
@@ -72,7 +71,7 @@ For ScubaFlow:
   - Scale `minCap` and `baseOffset` with `slopeClearance = 31.0 + (S < 0 ? -34.0 * S : 36.0 * S)` to expand cave on steep sections.
   - Tunnels stay navigable. Procedural collectibles (up to $24\text{px}$ offset, clamped $\ge 40\text{px}$ clear from boundaries) attainable without collision.
 - **Macro Cavern Chambers & Rhythmic Beat Bounce**:
-  - Dynamic macro cavern chamber breathing (`chamberSwell = Math.sin(wx * 0.0012) * 24 * (1.0 - localEnergy * 0.5)`) smoothly opens calm ambient/breakdown passages into grand grottos (up to 112px base offset), contracting to tight technical challenge corridors during intense drops.
+  - Dynamic macro cavern chamber breathing (`chamberSwell = Math.sin(wx * 0.0012) * 8 * (1.0 - localEnergy * 0.5)`) smoothly breathes ambient/breakdown passages (up to 85px base offset), contracting to tight technical challenge corridors (56–78px) during intense drops.
   - Cavern boundaries (`getWallOffsets`) expand outward with beat hits (`beatPulseOffset = (currentBeatPulse || 0) * 8.5 * energyFactor * multiBeatScale`), driven by a continuous attack-decay envelope ($65\text{ms}$ attack swell on calm tracks, $28\text{ms}$ on intense tracks) followed by zero-velocity quadratic decay. On calm tracks (<0.08 energy), `energyFactor` scales softly to a serene 0.4–1.0px breath, eliminating mechanical twitches on vocal/choral music.
   - Tightly tuned challenge corridors ($56\text{–}78\text{px}$ base offset, $\ge 112\text{px}$ total corridor clearance) preserve high-speed flow and danger.
 
@@ -93,7 +92,7 @@ For ScubaFlow:
 - **Pause & Resume Lifecycle:**
   - `togglePause()` / `pauseDive()` suspends Web Audio clock (`audioContext.suspend()`), pauses update loop, renders glass pause modal displaying current score, flow multiplier (`this.scoreMultiplier`), and elapsed time.
   - `resumeDive()` resumes Web Audio (`audioContext.resume()`) and hides modal (`Esc` / `P` keys).
-  - `restartDive()` restarts dive from beginning (`R` key in pause or on results screen). Completely resets silt-out state (`siltActive`, `siltTime`, `currentSiltDuration`, `siltOverlay`, `siltVignetteImage`), kills living particles across `activeSiltBursts` and emitters instantly, resets PostFX chromatic offsets, flashlight intensity, audio lowpass filter, `this.scoreMultiplier = 1`, `this.comboCount = 0`, and `this.buddyState = 'normal'`. Clears lingering camera `fadeOut` effects with `resetFX()`, respawns all debris sprites via `spawnCollectibles()`, resets `clusterCollected = {}`, removes results card (`#complete-screen` / `.results-card`), and resets `this.baseHue = 0`.
+  - `restartDive()` restarts dive from beginning (`R` key in pause or on results screen). Completely resets silt-out state (`siltActive`, `siltTime`, `currentSiltDuration`, `siltOverlay`, `siltVignetteImage`), kills living particles across `activeSiltBursts` and emitters instantly, resets PostFX chromatic offsets, flashlight intensity, audio lowpass filter, `this.scoreMultiplier = 1`, `this.comboCount = 0`, and resets player and buddy to active horizontal trim (`getPlayerCorridorCenterY(250)` at $x=250$, `getBuddyTargetY(530, 0)` at $x=530$, `buddy.scaleX = 1`, `buddyState = 'normal'`, `updateDiverLimbs(0)`). Resets both main camera and `uiCamera` scroll (`scrollX = 0, scrollY = 0`), clears lingering camera `fadeOut` effects with `resetFX()`, respawns all debris sprites via `spawnCollectibles()`, resets `clusterCollected = {}`, removes results card (`#complete-screen` / `.results-card`), and resets `this.baseHue = 0`.
   - `exitToTrackSelect()` exits to track selection menu (`X` key in pause or on results screen). Stops all audio nodes, closes and nullifies `audioContext` and `window.customAudioContext`, clears all countdown/Phaser timers, removes results card, destroys Phaser instance, and unhides uploader overlay.
 - **Results Card Controls:**
   - Displays "DIVE AGAIN (R)" and "SELECT NEW TRACK (X)" wired with `bindFastTap` for instant mobile taps and keyboard hotkeys (`R`/`X`).
@@ -121,8 +120,7 @@ For ScubaFlow:
 
 ### Zero-HUD Diegetic Signals & Balance Mechanics
 Feedback physical + auditory:
-- **Vivid Neon Psychedelic Depth Zones**: High-contrast, hyper-saturated neon progression (Neon Reef -> Solar Ridge -> Ultraviolet Cavern -> Molten Abyss -> Cyber Ascent) with deterministic track-seeded base hue variance and seamless bidirectional 24-second cross-fade angular hue interpolation (`getCurrentZoneHues`) between zones — last 12s of outgoing zone fades out while first 12s of incoming zone fades in, using smoothstep easing — to eliminate abrupt color snapping.
-- **Lung Volume**: Player sprite chest expansion (ellipse scale) + breathing audio synth freq.
+- **Lung Volume**: Buoyancy vertical trajectory + breathing audio synth pitch modulation ($300 + V_{lung} \cdot 600\text{Hz}$) + bubble emission on exhale + organic diver torso expansion ($14\text{–}20\text{px}$).
 - **Failure - Silt-Out & Light Cone Failure**: Wall collision blind player with particle cloud. Wait for silt to clear while steady.
   - **Relative Duration**: Silt recovery time proportional to vertical impact velocity (`impactVy`), scale 0.44x-1.33x of `siltDuration` (~800ms to ~2400ms). Duration scale inverse with `baseScrollSpeed` (factor $50/\text{baseScrollSpeed}$).
   - **Dynamic Color Shifts**: Shift `this.baseHue` by 120 deg on wall collision, update cave palette + silt particle color.
@@ -133,7 +131,7 @@ Feedback physical + auditory:
 - **Active AI Companion Guide**:
   - **Center-Channel Scout Drafting**: Buddy tracks true corridor midpoint (`(floorY + ceilY) * 0.5`) with organic sinusoidal breathing sway ($\pm 10\text{px}$) and generous boundary margins ($18\text{–}32\text{px}$). Fluid exponential glide ($k = 2.2$ on Y, $k = 0.9$ on X) absorbs high-frequency rock spikiness and decouples flipper flutter, eliminating jitter and rock hugging.
   - **Horizontal Trim**: Divers maintain realistic technical cave diving horizontal trim with level forward-facing dive lamps, eliminating unnatural tilt jitter.
-- **Realistic Flashlight Occlusion & Continuous Gradual Attenuation**: Flashlight beam raycast shadow-casting obstructed by terrain protrusions. Multi-slice progressive polynomial attenuation ($T(t) = (1 - t^2)^2$) smoothly tapers beam from emitter to zero at outer range without stepped cutoff bands. Snow illumination check interpolate occluded beam points.
+- **Realistic Flashlight Occlusion & Convex Dome Wavefront**: Flashlight beam raycast shadow-casting obstructed by terrain protrusions. Rendered as 3 expanding optical cones (ambient outer cone, focused mid beam, and hot white core) terminating in forward-projecting convex spherical dome wavefront caps, eliminating vertical segmentation chops and unnatural pinched bullet points. Snow illumination check interpolates occluded beam points.
   - **Zero-GC Raycast Caching**: `playerLightCache` and `buddyLightCache` pre-allocate static 32-point coordinate buffers on scene initialization, mutating points in-place during raycasting to eliminate 7,200 object allocations/second during active dive gameplay.
 - **Mobile Web Haptics API (`navigator.vibrate`)**:
   - Breath transition: $12\text{ms}$ tap on inhalation/exhalation turnaround.
@@ -164,16 +162,16 @@ Multiplier $\ge \times 10$:
 
 ### Cinematic Visuals & PostFX Pipeline
 - **Living Underwater Micro-Refraction**: WebGL `PsychedelicFX` shader applies subtle organic liquid wave distortion to screen UVs (`uTime`).
-- **Dynamic Bioluminescent Caustics**: Voronoi-approx underwater light mesh (`uCausticIntensity`) shimmers across cave walls, dynamically scaling with audio beats and flow state.
+- **Dynamic Bioluminescent Caustics**: Voronoi-approx underwater light mesh (`uCausticIntensity`) shimmers with continuous lowpass audio reactivity and silky quadratic falloff across cave walls.
 - **Deep-Sea Edge Vignette**: Smooth radial contrast falloff (`dot * 0.85`) gently dimming screen corners and edges toward pitch-black void `#000206` without washing out scene contrast.
 - **Radiant Diamond Shard Debris & Glint Sparks**: Collectibles rendered as glowing multi-stop diamond crystals with rotating core and outer neon aura. Debris explosions release 4-point diamond glint stars.
 - **Translucent Scuba Bubbles & Specular Sheen**: Dedicated procedural bubble texture featuring spherical glass membrane, internal refraction, and dual specular light highlights for breathing exhales and ambient floating bubbles.
-- **Luminous Lamp Lens Halos & Beam Audio Boost**: Player and buddy dive lamps emit radiant multi-ring halogen bulb blooms ($36\text{px}$ optical flare) at beam origins with smooth optical falloff. Transient drum kicks drive real-time flashlight cone luminosity pulses (`beamAudioBoost = 1.0 + liveBassTransient * 0.45`), illuminating the entire 320px corridor on beat.
+- **Luminous Lamp Lens Halos & Fused Audio Reactivity**: Player and buddy dive lamps emit radiant multi-ring halogen bulb blooms ($38\text{px}$ optical flare) at beam origins with smooth optical falloff. Fused rhythm engine (`Math.max(currentBeatPulse, liveBassTransient)`) pulses flashlight cone luminosity and bulb bloom halo in sync with musical beats across all genres.
 - **2.5D Multi-Plane Cavern Depth & Parallax Sandwich**:
-  - **Recessed Cavern Backwall (`depth -0.5`)**: Fills corridor between ceiling and floor with an ambient grotto tone modulated by sub-bass acoustic pressure. Tightly anchored soft elliptical flashlight reflection spots track directly at diver torch heads (`spotX = px + 40`, `torchY = py - 2`), eliminating steep-slope detachment, rock bleed, and forward phantom runaway.
+  - **Recessed Cavern Backwall (`depth -0.5`)**: Fills corridor between ceiling and floor with an ambient grotto tone modulated by sub-bass acoustic pressure, providing clean deep void contrast for neon diver silhouettes and forward-projecting volumetric beams without artificial vector spotlight discs.
   - **Opaque Solid Rock Mask (`depth 0.0`)**: Solid void `#000206` fill extending outward from cave ceiling and floor boundaries, physically occluding all background layers outside the corridor and preserving crisp, high-contrast neon boundary strokes.
   - **Near-Field Foreground Rock Silhouettes (`depth 22`)**: Procedural dark jagged stalactites and arches scrolling at $1.35\times$ camera speed across extreme foreground, occluding diver and buddy for a visual parallax sandwich.
-  - **Z-Perspective Marine Snow**: Motes assigned perspective depth $z \in [0.35, 2.0]$, scaling drift velocity and particle radius by $1/z$, with dual-depth rendering ($z < 0.85$ rendered at `depth 15` as near-field bokeh orbs in front of diver, $z \ge 0.85$ at `depth -1.5` behind diver).
+  - **Z-Perspective Marine Snow (`depth -1.5`)**: Motes assigned perspective depth $z \in [0.35, 2.0]$, scaling drift velocity and particle radius by $1/z$, rendered behind corridor terrain at `depth -1.5` so cave walls physically occlude particles without visual pop or overlap.
 
 ### Uncapped Deterministic Simulation
 - Rating calculation via `calculateMaxPotentialPoints()`.

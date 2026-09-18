@@ -35,8 +35,8 @@ class PsychedelicFX extends Phaser.Renderer.WebGL.Pipelines.PostFXPipeline {
                     vec2 cUV = uv * vec2(10.0, 6.0);
                     float p1 = sin(cUV.x + uTime * 0.8) + sin(cUV.y + uTime * 0.9);
                     float p2 = sin(cUV.x * 0.7 - uTime * 0.7 + p1) + cos(cUV.y * 0.8 + uTime * 0.6 + p1);
-                    float caustic = pow(clamp(0.5 + 0.5 * sin(p2 * 2.5), 0.0, 1.0), 4.0);
-                    vec3 causticCol = vec3(0.0, 0.94, 1.0) * (caustic * uCausticIntensity);
+                    float caustic = pow(clamp(0.5 + 0.5 * sin(p2 * 2.5), 0.0, 1.0), 2.0);
+                    vec3 causticCol = vec3(0.85, 0.95, 1.0) * (caustic * uCausticIntensity);
 
                     // 4. Subtle cinematic edge vignette
                     vec2 vigCoord = (uv - 0.5) * vec2(1.25, 1.0);
@@ -219,6 +219,7 @@ class ScubaFlowScene extends Phaser.Scene {
         this.diverLimbs = {
             ke: 0, ke2: 0, foot1X: 0, foot1Y: 0, foot2X: 0, foot2Y: 0
         };
+        this.updateDiverLimbs(0);
         this.screenTouchActive = false;
         this.isPaused = false;
     }
@@ -511,15 +512,16 @@ class ScubaFlowScene extends Phaser.Scene {
                             this.generateProceduralLevel(decodedBuffer);
                             console.log("generateProceduralLevel completed.");
 
-                            // Spawn player and buddy matching initial path positions
-                            let playerStartY = this.getTargetYAtTime((250 / this.baseScrollSpeed) * 1000);
-                            let buddyStartY = this.getTargetYAtTime((550 / this.baseScrollSpeed) * 1000);
+                            // Spawn player and buddy matching initial active trim positions
+                            let playerStartY = this.getPlayerCorridorCenterY(250);
+                            let buddyStartY = this.getBuddyTargetY(530, 0);
                             console.log("Player spawn Y:", playerStartY, "Buddy spawn Y:", buddyStartY);
 
                             this.spawnDiver(playerStartY);
                             console.log("Player spawned.");
                             this.spawnBuddy(buddyStartY);
                             console.log("Buddy spawned.");
+                            this.updateDiverLimbs(0);
                             this.spawnCollectibles();
                             console.log("Collectibles spawned.");
 
@@ -541,7 +543,7 @@ class ScubaFlowScene extends Phaser.Scene {
                                 });
                             }
                             this.marineSnowGraphics = this.add.graphics().setDepth(-1.5).setScrollFactor(1);
-                            this.marineSnowForegroundGraphics = this.add.graphics().setDepth(15).setScrollFactor(1);
+                            this.marineSnowForegroundGraphics = null;
 
                             // Set camera to follow player
                             this.cameras.main.startFollow(this.player, true, 0.1, 1, -250, 0);
@@ -681,12 +683,32 @@ class ScubaFlowScene extends Phaser.Scene {
         this.elapsedTime = 0;
         this.isPlaying = true; // allow update loop to render the starting scene
 
+        let pY = this.getPlayerCorridorCenterY(250);
+        let bY = this.getBuddyTargetY(530, 0);
+        if (this.player) {
+            this.player.x = 250;
+            this.player.y = pY;
+            this.player.rotation = 0;
+            this.player.vy = 0;
+        }
+        this.V_lung = 0.5;
+        this.buoyancySmooth = 0.5;
+        this.vy = 0;
+        if (this.buddy) {
+            this.buddy.x = 530;
+            this.buddy.y = bY;
+            this.buddy.scaleX = 1;
+            this.buddy.rotation = 0;
+        }
+        this.buddyState = 'normal';
+        this.updateDiverLimbs(0);
+
         // Diegetic Avatar Clarity: Show "YOU" and "FOLLOW ME 👌" during countdown
         if (this.buddyBubble) {
-            this.buddyBubble.setText("FOLLOW ME 👌").setVisible(true).setPosition(this.buddy.x, this.buddy.y - 45);
+            this.buddyBubble.setText("FOLLOW ME 👌").setVisible(true).setPosition(this.buddy ? this.buddy.x : 530, (this.buddy ? this.buddy.y : bY) - 45);
         }
         if (this.playerBubble) {
-            this.playerBubble.setText("YOU 🫧").setVisible(true).setPosition(this.player.x, this.player.y - 45);
+            this.playerBubble.setText("YOU 🫧").setVisible(true).setPosition(this.player ? this.player.x : 250, (this.player ? this.player.y : pY) - 45);
         }
 
         // Concurrent Track Info Overlay during 3s countdown (positioned at top-center away from divers)
@@ -821,13 +843,20 @@ class ScubaFlowScene extends Phaser.Scene {
             if (this.countdownActive) {
                 this.elapsedTime = 0;
                 this.player.x = 250;
-                this.buddy.x = 550;
+                this.player.y = this.getPlayerCorridorCenterY(250);
+                this.player.rotation = 0;
+                this.player.vy = 0;
+                this.V_lung = 0.5;
+                this.buoyancySmooth = 0.5;
+                this.vy = 0;
 
-                let buddyStartY = this.getTargetYAtTime((550 / this.baseScrollSpeed) * 1000);
-                this.buddy.y = buddyStartY;
+                this.buddy.x = 530;
+                this.buddy.y = this.getBuddyTargetY(530, 0);
+                this.buddy.scaleX = 1;
+                this.buddy.rotation = 0;
+                this.buddyState = 'normal';
 
-                let playerStartY = this.getTargetYAtTime((250 / this.baseScrollSpeed) * 1000);
-                this.player.y = playerStartY;
+                this.updateDiverLimbs(0);
 
                 if (this.buddyBubble && this.buddyBubble.visible) {
                     this.buddyBubble.setPosition(this.buddy.x, this.buddy.y - 45);
@@ -835,11 +864,6 @@ class ScubaFlowScene extends Phaser.Scene {
                 if (this.playerBubble && this.playerBubble.visible) {
                     this.playerBubble.setPosition(this.player.x, this.player.y - 45);
                 }
-
-                // Simulate normal breathing cycle for player visuals during countdown
-                let breathPeriod = 3600;
-                let breathPhase = (time % breathPeriod) / breathPeriod;
-                this.V_lung = 0.5 + 0.3 * Math.sin(breathPhase * Math.PI * 2);
 
                 this.emitBreathingParticles();
 
@@ -862,8 +886,8 @@ class ScubaFlowScene extends Phaser.Scene {
 
                 let fx = this.cameras.main.getPostPipeline(PsychedelicFX);
                 if (fx) {
-                    fx.fxTime = time / 1000;
-                    fx.causticIntensity = 0.035;
+                    fx.fxTime = (fx.fxTime || 0) + (delta / 1000);
+                    fx.causticIntensity = 0.025;
                 }
                 return;
             }
@@ -895,28 +919,8 @@ class ScubaFlowScene extends Phaser.Scene {
 
 
             // Multi-point body checkPoints definition (cached on instance to avoid GC churn)
-            let frogPhase = (this.elapsedTime / 350) % (Math.PI * 2);
-            let ke = Math.max(0, Math.sin(frogPhase));
-            let frogPhase2 = frogPhase + 0.25;
-            let ke2 = Math.max(0, Math.sin(frogPhase2));
-
-            let foot2X = -8 - (6 + ke * 8) - (2 + ke * 12);
-            let foot2Y = -6 - (12 - ke * 8) - (10 - ke * 10);
-            let foot1X = -10 - (6 + ke2 * 8) - (2 + ke2 * 12);
-            let foot1Y = 2 - (12 - ke2 * 8) - (10 - ke2 * 10);
-
-            this.diverLimbs.ke = ke;
-            this.diverLimbs.ke2 = ke2;
-            this.diverLimbs.foot1X = foot1X;
-            this.diverLimbs.foot1Y = foot1Y;
-            this.diverLimbs.foot2X = foot2X;
-            this.diverLimbs.foot2Y = foot2Y;
-
+            this.updateDiverLimbs(this.elapsedTime);
             let checkPoints = this.playerCheckPoints;
-            checkPoints[4].x = foot1X;
-            checkPoints[4].y = foot1Y;
-            checkPoints[5].x = foot2X;
-            checkPoints[5].y = foot2Y;
 
             // 2. Process Input & Buoyancy State
             if (this.useAutopilot) {
@@ -1306,23 +1310,7 @@ class ScubaFlowScene extends Phaser.Scene {
 
 
             // Natural scout drafting: buddy stays comfortably centered in the open corridor
-            let { floorY: bFloorY, ceilY: bCeilY } = this.getWallY(this.buddy.x);
-            let corridorCenterY = (bFloorY + bCeilY) * 0.5;
-            let corridorHalfHeight = (bFloorY - bCeilY) * 0.5;
-
-            // Gentle, organic swimming sway (natural dive buddy buoyancy breathing drift)
-            let swimSway = Math.sin(this.elapsedTime * 0.0016 + 1.2) * Math.min(10, corridorHalfHeight * 0.2);
-            let targetBuddyY = corridorCenterY + swimSway;
-
-            // Generous safety buffer keeping buddy comfortably away from rocky ceiling and floor
-            let safeMargin = Math.min(32, Math.max(18, corridorHalfHeight - 20));
-            let minSafeY = bCeilY + safeMargin;
-            let maxSafeY = bFloorY - safeMargin;
-            if (minSafeY <= maxSafeY) {
-                targetBuddyY = Phaser.Math.Clamp(targetBuddyY, minSafeY, maxSafeY);
-            } else {
-                targetBuddyY = corridorCenterY;
-            }
+            let targetBuddyY = this.getBuddyTargetY(this.buddy.x, this.elapsedTime);
 
             // Smooth fluid exponential glide (zero high-frequency jitter, zero harsh snapping)
             this.buddy.y = Phaser.Math.Linear(this.buddy.y, targetBuddyY, 1 - Math.exp(-2.2 * physDt));
@@ -1346,12 +1334,13 @@ class ScubaFlowScene extends Phaser.Scene {
             let fx = this.cameras.main.getPostPipeline(PsychedelicFX);
             if (fx) {
                 // Sub-bass acoustic pressure gently modulates underwater refraction wave rate
-                fx.fxTime = (this.elapsedTime / 1000) * (1.0 + (this.liveBassLevel || 0) * 0.25);
-                let beatBoost = (this.currentBeatPulse || 0) * 0.025;
+                fx.fxTime = (fx.fxTime || 0) + dt * (0.8 + (this.liveBassLevel || 0) * 0.4);
+                let beatBoost = (this.currentBeatPulse || 0) * 0.015;
                 let flowBoost = Math.min(6, this.visualMultiplier - 1) * 0.003;
-                // High/mid audible spectrum energy directly drives caustics shimmering glint
-                let liveCausticBoost = (this.liveAudioEnergy || 0) * 0.035;
-                fx.causticIntensity = this.siltActive ? 0.01 : (0.035 + beatBoost + flowBoost + liveCausticBoost);
+                // High/mid audible spectrum energy gently modulates caustics shimmer
+                let liveCausticBoost = (this.liveAudioEnergy || 0) * 0.02;
+                let targetCaustic = this.siltActive ? 0.01 : (0.025 + beatBoost + flowBoost + liveCausticBoost);
+                fx.causticIntensity = Phaser.Math.Linear(fx.causticIntensity !== undefined ? fx.causticIntensity : 0.025, targetCaustic, dt * 2.5);
 
                 // Decay custom level-up chromatic offset
                 if (this.levelUpChromaticOffset > 0) {
@@ -1555,16 +1544,19 @@ class ScubaFlowScene extends Phaser.Scene {
         }
     }
 
-    spawnDiver(startY = 200) {
+    spawnDiver(startY = 250) {
         this.player = this.add.container(250, startY).setDepth(10);
         this.playerGraphics = this.add.graphics();
         this.player.add(this.playerGraphics);
+        this.player.rotation = 0;
     }
 
-    spawnBuddy(startY = 200) {
-        this.buddy = this.add.container(550, startY).setDepth(10);
+    spawnBuddy(startY = 250) {
+        this.buddy = this.add.container(530, startY).setDepth(10);
         this.buddyGraphics = this.add.graphics();
         this.buddy.add(this.buddyGraphics);
+        this.buddy.scaleX = 1;
+        this.buddy.rotation = 0;
     }
 
     setupEmitters() {
@@ -1650,11 +1642,9 @@ class ScubaFlowScene extends Phaser.Scene {
     }
 
     updateMarineSnow(dt) {
-        let gBack = this.marineSnowGraphics;
-        let gFore = this.marineSnowForegroundGraphics || gBack;
-        if (!gBack) return;
-        gBack.clear();
-        if (gFore && gFore !== gBack) gFore.clear();
+        let g = this.marineSnowGraphics;
+        if (!g) return;
+        g.clear();
         if (!this.player || !this.buddy) return;
 
         let camX = this.cameras.main.scrollX;
@@ -1770,10 +1760,9 @@ class ScubaFlowScene extends Phaser.Scene {
                 color = isSuper ? 0x38bdf8 : 0x475569;
             }
 
-            // Perspective size & target graphics selection
+            // Perspective size
             let baseR = mote.baseSize || mote.size || 1.2;
             let renderSize = Math.max(0.4, baseR * invZ);
-            let g = (z < 0.85 && gFore) ? gFore : gBack;
             let zAlphaMult = (z < 0.85) ? Math.min(1.2, 0.75 + (1.0 - z) * 0.6) : 1.0;
 
             g.fillStyle(color, mote.alpha * zAlphaMult);
@@ -2182,10 +2171,6 @@ class ScubaFlowScene extends Phaser.Scene {
         let mainColor = this.hslToColorInt(playerHue / 360, flowSat, 0.55 + flowLightBoost);
         let accentColor = this.hslToColorInt(((playerHue + 130) % 360) / 360, flowSat, 0.6 + flowLightBoost);
 
-        let glowRadius = 20 + this.V_lung * 8 + pulse * 8 + (this.visualMultiplier - 1) * 4;
-        g.fillStyle(mainColor, 0.08 + this.V_lung * 0.04 + pulse * 0.08);
-        g.fillCircle(0, 0, glowRadius);
-
         // --- AURA RINGS: concentric neon rings that grow with scoreMultiplier ---
         // x1: none. x2-x7: rings. x8+: 7 rings.
         let curMultiplier = this.smoothVisualMultiplier || this.scoreMultiplier || 1;
@@ -2305,22 +2290,15 @@ class ScubaFlowScene extends Phaser.Scene {
         }
         g.strokePath();
 
-        // 3. Torso & Chest
+        // 3. Torso (stretches organically with breathing)
+        let torsoW = 14 + (lungVolume || 0.5) * 6;
+        let torsoH = 10 + (lungVolume || 0.5) * 4;
         g.lineStyle(2, mainColor, 1.0);
         if (!isWireframe) {
             g.fillStyle(0x020514, 0.95);
-            g.fillEllipse(-4, 0, 16, 12);
+            g.fillEllipse(-4, 0, torsoW, torsoH);
         }
-        g.strokeEllipse(-4, 0, 16, 12);
-
-        let chestW = 10 + lungVolume * 8;
-        let chestH = 8 + lungVolume * 6;
-        g.lineStyle(1.2, accentColor, 0.6 + lungVolume * 0.4);
-        if (!isWireframe) {
-            g.fillStyle(mainColor, 0.15 + lungVolume * 0.25);
-            g.fillEllipse(-2, 0, chestW, chestH);
-        }
-        g.strokeEllipse(-2, 0, chestW, chestH);
+        g.strokeEllipse(-4, 0, torsoW, torsoH);
 
         // Safety Reel spool (carried by buddy, cave diving protocol)
         if (hasReel) {
@@ -2544,79 +2522,74 @@ class ScubaFlowScene extends Phaser.Scene {
             }
         }
 
-        // Continuous gradual light progression from origin to tip
-        // Smooth monotonic attenuation with zero-slope feathered dissipation at beam limits
-        let beamAudioBoost = 1.0 + (this.liveBassTransient || 0) * 0.45;
-        let peakMainAlpha = (0.28 + (this.visualMultiplier - 1) * 0.03) * intensity * beamAudioBoost;
-        let peakCoreAlpha = (0.14 + (this.visualMultiplier - 1) * 0.015) * intensity * beamAudioBoost;
-        let coreCutoff = 0.72;
+        // Fused audio responsiveness: offline rhythmic beat pulse (ambient/vocal/choral) + live sub-bass transients
+        let audioPulse = Math.max(this.currentBeatPulse || 0, this.liveBassTransient || 0);
+        let beamAudioBoost = 1.0 + audioPulse * 0.55;
+        let peakMainAlpha = (0.24 + (this.visualMultiplier - 1) * 0.025) * intensity * beamAudioBoost;
+        let peakCoreAlpha = (0.35 + (this.visualMultiplier - 1) * 0.03) * intensity * beamAudioBoost;
 
-        let tMain = (t) => {
-            if (t <= 0) return 1;
-            if (t >= 1) return 0;
-            let u = 1 - t * t;
-            return u * u;
-        };
+        // Render 3 natural expanding optical cones with convex spherical dome wavefronts
+        // Eliminates both vertical segmentation chops AND unnatural pinched bullet points
+        let drawDomeCone = (k, widthRatio, col, alpha) => {
+            if (alpha <= 0.001 || k <= 0) return;
+            g.fillStyle(col, alpha);
+            g.beginPath();
+            g.moveTo(x0, y0);
 
-        let tCore = (t) => {
-            if (t <= 0) return 1;
-            if (t >= coreCutoff) return 0;
-            let u = 1 - Math.pow(t / coreCutoff, 2);
-            return u * u;
-        };
-
-        // Render 10 progressive nested slices (sampled along the 30 boundary steps)
-        // Eliminates redundant mobile fill-rate overdraw while preserving smooth polynomial falloff
-        let numSlices = 10;
-        for (let s = 1; s <= numSlices; s++) {
-            let tPrev = (s - 1) / numSlices;
-            let tCurr = s / numSlices;
-            let k = Math.min(steps, Math.round(s * (steps / numSlices)));
-
-            let wMain = tMain(tPrev) - tMain(tCurr);
-            if (wMain > 0.0001) {
-                g.fillStyle(lightCol, peakMainAlpha * wMain);
-                g.beginPath();
-                g.moveTo(x0, y0);
-                for (let i = 0; i <= k; i++) g.lineTo(topPoints[i].x, topPoints[i].y);
-                for (let i = k; i >= 0; i--) g.lineTo(bottomPoints[i].x, bottomPoints[i].y);
-                g.closePath();
-                g.fillPath();
+            // 1. Forward top boundary following raycast occlusion
+            for (let i = 0; i <= k; i++) {
+                let yT = y0 + (topPoints[i].y - y0) * widthRatio;
+                g.lineTo(topPoints[i].x, yT);
             }
 
-            let wCore = tCore(tPrev) - tCore(tCurr);
-            if (wCore > 0.0001) {
-                g.fillStyle(0xffffff, peakCoreAlpha * wCore);
-                g.beginPath();
-                g.moveTo(x0, y0);
-                for (let i = 0; i <= k; i++) {
-                    let coreTop = topPoints[i].y * 0.45 + y0 * 0.55;
-                    g.lineTo(topPoints[i].x, coreTop);
-                }
-                for (let i = k; i >= 0; i--) {
-                    let coreBottom = bottomPoints[i].y * 0.45 + y0 * 0.55;
-                    g.lineTo(topPoints[i].x, coreBottom);
-                }
-                g.closePath();
-                g.fillPath();
-            }
-        }
+            // 2. Convex spherical wavefront dome cap at outer beam limit
+            let topY = y0 + (topPoints[k].y - y0) * widthRatio;
+            let botY = y0 + (bottomPoints[k].y - y0) * widthRatio;
+            let tipX = topPoints[k].x;
+            let midY = (topY + botY) * 0.5;
+            let halfH = Math.max(1, (botY - topY) * 0.5);
+            let domeBulge = Math.min(halfH * 0.55, 26) * dir;
 
-        // Draw luminous lamp bulb lens glow with gradual optical bloom and live audio transient flare
-        let liveFlare = 1.0 + (this.liveBassTransient || 0) * 0.65;
+            let arcSteps = 6;
+            for (let s = 1; s <= arcSteps; s++) {
+                let angle = -Math.PI / 2 + (s / arcSteps) * Math.PI;
+                let aX = tipX + Math.cos(angle) * domeBulge;
+                let aY = midY + Math.sin(angle) * halfH;
+                g.lineTo(aX, aY);
+            }
+
+            // 3. Backward bottom boundary returning to lamp emitter
+            for (let i = k; i >= 0; i--) {
+                let yB = y0 + (bottomPoints[i].y - y0) * widthRatio;
+                g.lineTo(bottomPoints[i].x, yB);
+            }
+
+            g.closePath();
+            g.fillPath();
+        };
+
+        // 1. Ambient outer spill cone (full reach, soft atmospheric illumination)
+        drawDomeCone(steps, 1.0, lightCol, peakMainAlpha * 0.30);
+        // 2. Focused mid halogen beam (72% reach, crisp penetration)
+        drawDomeCone(Math.round(steps * 0.72), 0.55, lightCol, peakMainAlpha * 0.60);
+        // 3. Hot filament core (40% reach, brilliant white center)
+        drawDomeCone(Math.round(steps * 0.40), 0.28, 0xffffff, peakCoreAlpha * 0.75);
+
+        // Draw luminous lamp bulb lens glow with gradual optical bloom and fused audio pulse flare
+        let liveFlare = 1.0 + audioPulse * 0.85;
         if (typeof g.fillCircle === 'function') {
             // Radiant optical lens bloom halo (wide, soft falloff projecting forward into the water)
-            g.fillStyle(lightCol, 0.045 * intensity * liveFlare);
-            g.fillCircle(x0 + 6 * dir, y0, 36 * liveFlare);
-            g.fillStyle(lightCol, 0.09 * intensity * liveFlare);
-            g.fillCircle(x0 + 4 * dir, y0, 22 * liveFlare);
+            g.fillStyle(lightCol, 0.05 * intensity * liveFlare);
+            g.fillCircle(x0 + 6 * dir, y0, 38 * liveFlare);
+            g.fillStyle(lightCol, 0.10 * intensity * liveFlare);
+            g.fillCircle(x0 + 4 * dir, y0, 24 * liveFlare);
 
             // Core halogen bulb lens glow
-            g.fillStyle(lightCol, 0.22 * intensity * liveFlare);
-            g.fillCircle(x0, y0, 12 * liveFlare);
-            g.fillStyle(0xffffff, 0.45 * intensity * liveFlare);
-            g.fillCircle(x0, y0, 6 * liveFlare);
-            g.fillStyle(0xffffff, 0.85 * intensity * liveFlare);
+            g.fillStyle(lightCol, 0.25 * intensity * liveFlare);
+            g.fillCircle(x0, y0, 13 * liveFlare);
+            g.fillStyle(0xffffff, 0.55 * intensity * liveFlare);
+            g.fillCircle(x0, y0, 7 * liveFlare);
+            g.fillStyle(0xffffff, 0.90 * intensity * liveFlare);
             g.fillCircle(x0, y0, 3 * liveFlare);
         }
 
@@ -2761,9 +2734,9 @@ class ScubaFlowScene extends Phaser.Scene {
             bg.clear();
 
             let backwallHue = (floorHue + 210) % 360;
-            let backwallColor = this.hslToColorInt(backwallHue / 360, 0.50, 0.09 + flowFill * 0.05);
-            let subBassRumble = (this.liveBassLevel || 0) * 0.12;
-            let backwallAlpha = (this.siltActive ? 0.22 : Math.min(0.75, 0.60 + flowFill * 0.15)) + subBassRumble;
+            let backwallColor = this.hslToColorInt(backwallHue / 360, 0.40, 0.06 + flowFill * 0.04);
+            let subBassRumble = (this.liveBassLevel || 0) * 0.04;
+            let backwallAlpha = (this.siltActive ? 0.12 : Math.min(0.18, 0.06 + flowFill * 0.06)) + subBassRumble;
 
             // 1. Solid ambient backwall filling corridor between ceiling and floor
             bg.fillStyle(backwallColor, backwallAlpha);
@@ -2779,43 +2752,6 @@ class ScubaFlowScene extends Phaser.Scene {
             bg.fillPath();
 
 
-
-            // 3. Volumetric Torch Backwall Reflection (Soft elliptical spotlight anchored to torch heads)
-            if (!this.siltActive) {
-                // Player Torch Backwall Reflection (anchored to torch at px + 26, tracking beam origin)
-                if (this.player) {
-                    let px = this.player.x;
-                    let spotX = px + 40;
-                    let { floorY: pF, ceilY: pC } = this.getWallY(spotX);
-                    let ryMax = Math.min(50, (pF - pC) * 0.40);
-                    let clampedPy = Phaser.Math.Clamp(this.player.y - 2, pC + ryMax * 0.85, pF - ryMax * 0.85);
-
-                    let torchHue = (floorHue + 25) % 360;
-                    let torchBackCol = this.hslToColorInt(torchHue / 360, 0.85, 0.38);
-                    let torchIntensity = (this.lightFlashIntensity !== undefined ? this.lightFlashIntensity : 1.0);
-                    bg.fillStyle(torchBackCol, 0.16 * torchIntensity);
-                    bg.fillEllipse(spotX, clampedPy, 160, ryMax * 1.8);
-                    bg.fillStyle(0xffffff, 0.08 * torchIntensity);
-                    bg.fillEllipse(spotX - 10, clampedPy, 85, ryMax * 0.95);
-                }
-
-                // Buddy Torch Backwall Reflection (anchored to buddy torch tracking beam origin & direction)
-                if (this.buddy) {
-                    let bx = this.buddy.x;
-                    let bDir = this.buddy.scaleX || 1;
-                    let bSpotX = bx + 35 * bDir;
-                    let { floorY: bF, ceilY: bC } = this.getWallY(bSpotX);
-                    let bryMax = Math.min(46, (bF - bC) * 0.38);
-                    let clampedBy = Phaser.Math.Clamp(this.buddy.y - 2, bC + bryMax * 0.85, bF - bryMax * 0.85);
-
-                    let buddyHue = (floorHue + 140) % 360;
-                    let buddyBackCol = this.hslToColorInt(buddyHue / 360, 0.85, 0.38);
-                    bg.fillStyle(buddyBackCol, 0.13);
-                    bg.fillEllipse(bSpotX, clampedBy, 150, bryMax * 1.8);
-                    bg.fillStyle(0xffffff, 0.06);
-                    bg.fillEllipse(bSpotX - 10 * bDir, clampedBy, 80, bryMax * 0.95);
-                }
-            }
         }
 
         // Draw Floor (solid rock mask occludes background visuals outside cave)
@@ -3575,6 +3511,53 @@ class ScubaFlowScene extends Phaser.Scene {
         return { floorY: targetY + floorOffset, ceilY: targetY - ceilOffset };
     }
 
+    getPlayerCorridorCenterY(px = 250) {
+        let { floorY, ceilY } = this.getWallY(px);
+        return (floorY + ceilY) * 0.5;
+    }
+
+    getBuddyTargetY(bx = 530, timeMs = 0) {
+        let { floorY: bFloorY, ceilY: bCeilY } = this.getWallY(bx);
+        let corridorCenterY = (bFloorY + bCeilY) * 0.5;
+        let corridorHalfHeight = (bFloorY - bCeilY) * 0.5;
+        let swimSway = Math.sin(timeMs * 0.0016 + 1.2) * Math.min(10, corridorHalfHeight * 0.2);
+        let targetBuddyY = corridorCenterY + swimSway;
+        let safeMargin = Math.min(32, Math.max(18, corridorHalfHeight - 20));
+        let minSafeY = bCeilY + safeMargin;
+        let maxSafeY = bFloorY - safeMargin;
+        if (minSafeY <= maxSafeY) {
+            return Phaser.Math.Clamp(targetBuddyY, minSafeY, maxSafeY);
+        }
+        return corridorCenterY;
+    }
+
+    updateDiverLimbs(timeMs = 0) {
+        let frogPhase = (timeMs / 350) % (Math.PI * 2);
+        let ke = Math.max(0, Math.sin(frogPhase));
+        let frogPhase2 = frogPhase + 0.25;
+        let ke2 = Math.max(0, Math.sin(frogPhase2));
+
+        let foot2X = -8 - (6 + ke * 8) - (2 + ke * 12);
+        let foot2Y = -6 - (12 - ke * 8) - (10 - ke * 10);
+        let foot1X = -10 - (6 + ke2 * 8) - (2 + ke2 * 12);
+        let foot1Y = 2 - (12 - ke2 * 8) - (10 - ke2 * 10);
+
+        this.diverLimbs.ke = ke;
+        this.diverLimbs.ke2 = ke2;
+        this.diverLimbs.foot1X = foot1X;
+        this.diverLimbs.foot1Y = foot1Y;
+        this.diverLimbs.foot2X = foot2X;
+        this.diverLimbs.foot2Y = foot2Y;
+
+        let checkPoints = this.playerCheckPoints;
+        if (checkPoints && checkPoints[4] && checkPoints[5]) {
+            checkPoints[4].x = foot1X;
+            checkPoints[4].y = foot1Y;
+            checkPoints[5].x = foot2X;
+            checkPoints[5].y = foot2Y;
+        }
+    }
+
     getWallOffsets(wx, localEnergy) {
         // Calculate local path slope to dynamically adjust cave width for clearance
         let t1 = (wx / this.baseScrollSpeed) * 1000;
@@ -3587,9 +3570,9 @@ class ScubaFlowScene extends Phaser.Scene {
         // Sinking/descending is harder to react to, so downward slopes get symmetric/sufficient clearance.
         let slopeClearance = 31.0 + (slope < 0 ? -34.0 * slope : 36.0 * slope);
 
-        // Dynamic macro cavern chambers: slow sinusoidal breathing opens up grand grottos
-        let chamberSwell = Math.sin(wx * 0.0012) * 24 * (1.0 - localEnergy * 0.5);
-        let baseOffset = Math.max(88 - localEnergy * 30 + chamberSwell, slopeClearance + 6);
+        // Dynamic macro cavern chambers: subtle breathing modulation
+        let chamberSwell = Math.sin(wx * 0.0012) * 8 * (1.0 - localEnergy * 0.5);
+        let baseOffset = Math.max(78 - localEnergy * 22 + chamberSwell, slopeClearance + 5);
         let jaggednessMultiplier = 0.35 + localEnergy * 0.85;
 
         // Beat pulse scaled by multiplier and local energy — organic rhythmic cave expansion
@@ -3616,8 +3599,8 @@ class ScubaFlowScene extends Phaser.Scene {
         let highFreqSpikeF = (Math.sin(wx * 0.09) * 8 + Math.cos(wx * 0.18) * 4) * jaggednessMultiplier;
         let highFreqSpikeC = (Math.sin(wx * 0.08) * 8 + Math.cos(wx * 0.17) * 4) * jaggednessMultiplier;
 
-        let floorOffset = Math.max(minCap, baseOffset + (Math.cos(wx * 0.015) * 10 + Math.sin(wx * 0.04) * 5) * jaggednessMultiplier - highFreqSpikeF);
-        let ceilOffset = Math.max(minCap, baseOffset + (Math.sin(wx * 0.02) * 10 + Math.cos(wx * 0.05) * 5) * jaggednessMultiplier - highFreqSpikeC);
+        let floorOffset = Math.max(minCap, baseOffset + (Math.cos(wx * 0.015) * 10 + Math.sin(wx * 0.04) * 5) * jaggednessMultiplier - highFreqSpikeF) + beatPulseOffset;
+        let ceilOffset = Math.max(minCap, baseOffset + (Math.sin(wx * 0.02) * 10 + Math.cos(wx * 0.05) * 5) * jaggednessMultiplier - highFreqSpikeC) + beatPulseOffset;
 
         // Guarantee 100% collectability without wall collisions:
         // Max downward offset is 40px (+8px player torso + 16px safety margin = 64px min floor offset)
@@ -4208,17 +4191,24 @@ class ScubaFlowScene extends Phaser.Scene {
         let card = document.getElementById('complete-screen') || document.getElementById('results-card');
         if (card) card.remove();
 
-        // Reset player & buddy coordinates and physics
-        let playerStartY = this.getTargetYAtTime((250 / this.baseScrollSpeed) * 1000);
-        let buddyStartY = this.getTargetYAtTime((550 / this.baseScrollSpeed) * 1000);
+        // Reset player & buddy coordinates and physics to active horizontal trim
+        let playerStartY = this.getPlayerCorridorCenterY(250);
+        let buddyStartY = this.getBuddyTargetY(530, 0);
         this.player.x = 250;
         this.player.y = playerStartY;
+        this.player.rotation = 0;
         this.player.vy = 0;
         this.V_lung = 0.5;
         this.buoyancySmooth = 0.5;
         this.vy = 0;
-        this.buddy.x = 550;
+        this.lastSpaceDown = false;
+        this.buddy.x = 530;
         this.buddy.y = buddyStartY;
+        this.buddy.scaleX = 1;
+        this.buddy.rotation = 0;
+        this.buddyState = 'normal';
+        this.buddyStateTimer = 0;
+        this.updateDiverLimbs(0);
         // Stop all running audio sources before restarting
         this.stopAllAudio();
 
@@ -4320,6 +4310,11 @@ class ScubaFlowScene extends Phaser.Scene {
         // Reset camera and master gain
         this.cameras.main.resetFX();
         this.cameras.main.scrollX = 0;
+        this.cameras.main.scrollY = 0;
+        if (this.uiCamera) {
+            this.uiCamera.scrollX = 0;
+            this.uiCamera.scrollY = 0;
+        }
         this.cameras.main.setAlpha(1);
         let resetBgHue = (this.baseHue * 0.25) % 360;
         let resetBgColor = this.hslToColorInt(resetBgHue / 360, 0.7, 0.012);
@@ -5108,9 +5103,7 @@ class ScubaFlowScene extends Phaser.Scene {
         };
         let testLight = this.drawDiveLight(mockG, 100, 250, 1, 0xffffff, 0xff00ff, 0.5);
         console.assert(testLight !== undefined && testLight.topPoints.length === 31, "Assertion Failed: drawDiveLight must return 31 topPoints");
-        console.assert(recordedSliceAlphas.length >= 10 && recordedSliceAlphas.length <= 20, "Assertion Failed: drawDiveLight must render optimized progressive slices");
-        let lastSliceAlpha = recordedSliceAlphas[recordedSliceAlphas.length - 1];
-        console.assert(lastSliceAlpha !== undefined && lastSliceAlpha < 0.015, "Assertion Failed: Torch light must feather to near-zero at outer range");
+        console.assert(recordedSliceAlphas.length >= 2 && recordedSliceAlphas.length <= 4, "Assertion Failed: drawDiveLight must render smooth torch layers");
         for (let i = 0; i < testLight.topPoints.length; i++) {
             let ptTop = testLight.topPoints[i];
             let ptBottom = testLight.bottomPoints[i];
@@ -5177,6 +5170,9 @@ class ScubaFlowScene extends Phaser.Scene {
         if (activeFX) {
             console.assert(activeFX.causticIntensity !== undefined, "Assertion Failed: PsychedelicFX must have causticIntensity uniform");
             console.assert(activeFX.fxTime !== undefined, "Assertion Failed: PsychedelicFX must have fxTime uniform");
+            let prevT = activeFX.fxTime || 0;
+            activeFX.fxTime = prevT + 0.016;
+            console.assert(activeFX.fxTime > prevT, "Assertion Failed: fxTime must accumulate monotonically");
         }
         if (this.bubbleEmitter && this.bubbleEmitter.ops && this.bubbleEmitter.ops.scaleX) {
             console.assert(this.bubbleEmitter.ops.scaleX.start === 0.10 && this.bubbleEmitter.ops.scaleX.end === 0.42, "Assertion Failed: Bubble emitter must use varied scale range [0.10, 0.42]");
@@ -5189,18 +5185,26 @@ class ScubaFlowScene extends Phaser.Scene {
         if (this.foregroundRockGraphics) {
             console.assert(this.foregroundRockGraphics.depth === 22, "Assertion Failed: foregroundRockGraphics must be at depth 22");
         }
-        if (this.marineSnowForegroundGraphics) {
-            console.assert(this.marineSnowForegroundGraphics.depth === 15, "Assertion Failed: marineSnowForegroundGraphics must be at depth 15");
+        if (this.marineSnowGraphics) {
+            console.assert(this.marineSnowGraphics.depth === -1.5, "Assertion Failed: marineSnowGraphics must be at depth -1.5");
         }
         if (this.marineSnowMotes && this.marineSnowMotes.length > 0) {
             let sampleMote = this.marineSnowMotes[0];
             console.assert(typeof sampleMote.z === 'number' && sampleMote.z >= 0.2 && sampleMote.z <= 2.5, "Assertion Failed: Marine snow motes must have valid perspective depth z in [0.2, 2.5]");
         }
 
-        // Test 17: Diver Horizontal Trim
+        // Test 17: Diver Horizontal Trim & Active Starting Position
         if (this.buddy) {
             console.assert(this.buddy.rotation === 0, "Assertion Failed: buddy must maintain horizontal trim");
+            console.assert(this.buddy.scaleX === 1, "Assertion Failed: buddy must start facing forward");
         }
+        if (this.player) {
+            console.assert(this.player.rotation === 0, "Assertion Failed: player must maintain horizontal trim");
+        }
+        console.assert(typeof this.getPlayerCorridorCenterY === 'function', "Assertion Failed: getPlayerCorridorCenterY must be a function");
+        console.assert(typeof this.getBuddyTargetY === 'function', "Assertion Failed: getBuddyTargetY must be a function");
+        console.assert(typeof this.updateDiverLimbs === 'function', "Assertion Failed: updateDiverLimbs must be a function");
+        console.assert(this.diverLimbs && this.diverLimbs.foot1X !== 0 && this.diverLimbs.foot2Y !== 0, "Assertion Failed: diver limbs must initialize in active kick trim");
         let mockTrimG = { fillStyle: () => {}, beginPath: () => {}, moveTo: () => {}, lineTo: () => {}, closePath: () => {}, fillPath: () => {} };
         let testTrimLight = this.drawDiveLight(mockTrimG, 250, 300, 1, 0xffffff, 0x00f0ff, 0.5, false);
         console.assert(testTrimLight && testTrimLight.topPoints && testTrimLight.topPoints.length === 31, "Assertion Failed: drawDiveLight must return topPoints in horizontal trim");
@@ -5274,7 +5278,7 @@ class ScubaFlowScene extends Phaser.Scene {
         let savedBuddy = this.buddy;
         this.lightGraphics = dummyMockG;
         this.player = { x: 250, y: 300 };
-        this.buddy = { x: 550, y: 300, scaleX: 1, rotation: 0 };
+        this.buddy = { x: 530, y: 300, scaleX: 1, rotation: 0 };
         this.drawCaveLights();
         console.assert(this.playerBeam && this.playerBeam.topPoints.length === 31, "Assertion Failed: drawCaveLights must compute playerBeam");
         console.assert(this.buddyBeam && this.buddyBeam.topPoints.length === 31, "Assertion Failed: drawCaveLights must compute buddyBeam");
