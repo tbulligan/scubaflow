@@ -80,7 +80,7 @@ For ScubaFlow:
   - **Constant Scroll Speed:** Keep horizontal scroll speed constant (`scrollSpeed = baseScrollSpeed`).
   - **Seamless End (No Invisible Wall):** Disable clamping. Player glide forward smoothly during 2s camera fade (to `#020514`) + Web Audio volume ramp-down (to `0.0001`) before results card.
 - `musicSource.onended` mark audio complete when tab unfocused.
-- Redundant `setTimeout` fallback in `startFadeout` with Phaser `time.delayedCall` render results card in DOM when window blurred.
+- Redundant `setTimeout` fallback in `startFadeout` with Phaser `time.delayedCall` unhides static `#complete-screen` modal when window blurred.
 - Camera fade out `#020514`, master gain ramp down `0.0001`, gameplay systems active during transition.
 
 ### Zero-HUD Game Controls & Lifecycle Management
@@ -92,8 +92,8 @@ For ScubaFlow:
 - **Pause & Resume Lifecycle:**
   - `togglePause()` / `pauseDive()` suspends Web Audio clock (`audioContext.suspend()`), pauses update loop, renders glass pause modal displaying current score, flow multiplier (`this.scoreMultiplier`), and elapsed time.
   - `resumeDive()` resumes Web Audio (`audioContext.resume()`) and hides modal (`Esc` / `P` keys).
-  - `restartDive()` restarts dive from beginning (`R` key in pause or on results screen). Completely resets silt-out state (`siltActive`, `siltTime`, `currentSiltDuration`, `siltOverlay`, `siltVignetteImage`), kills living particles across `activeSiltBursts` and emitters instantly, resets PostFX chromatic offsets, flashlight intensity, audio lowpass filter, `this.scoreMultiplier = 1`, `this.comboCount = 0`, and resets player and buddy to active horizontal trim (`getPlayerCorridorCenterY(250)` at $x=250$, `getBuddyTargetY(530, 0)` at $x=530$, `buddy.scaleX = 1`, `buddyState = 'normal'`, `updateDiverLimbs(0)`). Resets both main camera and `uiCamera` scroll (`scrollX = 0, scrollY = 0`), clears lingering camera `fadeOut` effects with `resetFX()`, respawns all debris sprites via `spawnCollectibles()`, resets `clusterCollected = {}`, removes results card (`#complete-screen` / `.results-card`), and resets `this.baseHue = 0`.
-  - `exitToTrackSelect()` exits to track selection menu (`X` key in pause or on results screen). Stops all audio nodes, closes and nullifies `audioContext` and `window.customAudioContext`, clears all countdown/Phaser timers, removes results card, destroys Phaser instance, and unhides uploader overlay.
+  - `restartDive()` restarts dive from beginning (`R` key in pause or on results screen). Completely resets silt-out state (`siltActive`, `siltTime`, `currentSiltDuration`, `siltOverlay`, `siltVignetteImage`), kills living particles across `activeSiltBursts` and emitters instantly, resets PostFX chromatic offsets, flashlight intensity, audio lowpass filter, `this.scoreMultiplier = 1`, `this.comboCount = 0`, and resets player and buddy to active horizontal trim (`getPlayerCorridorCenterY(250)` at $x=250$, `getBuddyTargetY(530, 0)` at $x=530$, `buddy.scaleX = 1`, `buddyState = 'normal'`, `updateDiverLimbs(0)`). Resets both main camera and `uiCamera` scroll (`scrollX = 0, scrollY = 0`), clears lingering camera `fadeOut` effects with `resetFX()`, respawns all debris sprites via `spawnCollectibles()`, resets `clusterCollected = {}`, hides static results card (`#complete-screen`), and resets `this.baseHue = 0`.
+  - `exitToTrackSelect()` exits to track selection menu (`X` key in pause or on results screen). Stops all audio nodes, closes and nullifies `audioContext` and `window.customAudioContext`, clears all countdown/Phaser timers, hides results card (`#complete-screen`), destroys Phaser instance, and unhides uploader overlay.
 - **Results Card Controls:**
   - Displays "DIVE AGAIN (R)" and "SELECT NEW TRACK (X)" wired with `bindFastTap` for instant mobile taps and keyboard hotkeys (`R`/`X`).
 - **Start Countdown Avatar Clarity:**
@@ -161,11 +161,11 @@ Multiplier $\ge \times 10$:
 - **Superflow Text Notifications**: Level 10+ spawn yellow text (`🫧 SUPERFLOW x{multiplier}! 🫧`).
 
 ### Cinematic Visuals & PostFX Pipeline
-- **Living Underwater Micro-Refraction**: WebGL `PsychedelicFX` shader applies subtle organic liquid wave distortion to screen UVs (`uTime`).
-- **Dynamic Bioluminescent Caustics**: Voronoi-approx underwater light mesh (`uCausticIntensity`) shimmers with continuous lowpass audio reactivity and silky quadratic falloff across cave walls.
+- **Dynamic Bioluminescent Caustics**: Procedural underwater light web (`uCausticIntensity`) shimmering with continuous audio reactivity and soft ethereal illumination across the cavern interior.
+- **Hydrothermal Seabed Vents & Volumetric Plumes**: Glowing geothermal fissures along the cave floor emit translucent billowing smoke plumes via `plumeEmitter` (`depth 11`, `blendMode: 'ADD'`). Particles jet outward along the local seabed normal vector with upward thermal buoyancy and scale lifespan dynamically to corridor height (`floorY - ceilY`), dissipating naturally at the ceiling without clipping through rock. Overlay divers softly without boundary clutter.
 - **Deep-Sea Edge Vignette**: Smooth radial contrast falloff (`dot * 0.85`) gently dimming screen corners and edges toward pitch-black void `#000206` without washing out scene contrast.
 - **Radiant Diamond Shard Debris & Glint Sparks**: Collectibles rendered as glowing multi-stop diamond crystals with rotating core and outer neon aura. Debris explosions release 4-point diamond glint stars.
-- **Translucent Scuba Bubbles & Specular Sheen**: Dedicated procedural bubble texture featuring spherical glass membrane, internal refraction, and dual specular light highlights for breathing exhales and ambient floating bubbles.
+- **Translucent Scuba Bubbles & Specular Sheen**: Dedicated procedural bubble texture featuring spherical glass membrane, internal refraction, and dual specular light highlights for breathing exhales.
 - **Luminous Lamp Lens Halos & Fused Audio Reactivity**: Player and buddy dive lamps emit radiant multi-ring halogen bulb blooms ($38\text{px}$ optical flare) at beam origins with smooth optical falloff. Fused rhythm engine (`Math.max(currentBeatPulse, liveBassTransient)`) pulses flashlight cone luminosity and bulb bloom halo in sync with musical beats across all genres.
 - **2.5D Multi-Plane Cavern Depth & Parallax Sandwich**:
   - **Recessed Cavern Backwall (`depth -0.5`)**: Fills corridor between ceiling and floor with an ambient grotto tone modulated by sub-bass acoustic pressure, providing clean deep void contrast for neon diver silhouettes and forward-projecting volumetric beams without artificial vector spotlight discs.

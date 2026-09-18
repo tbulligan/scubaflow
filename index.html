@@ -785,6 +785,34 @@
             padding-top: 2px;
         }
 
+        /* Results Screen Overlay */
+        .results-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 2, 6, 0.88);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            z-index: 20;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            color: #e2e8f0;
+        }
+
+        @keyframes perfectPulse {
+            0% { transform: scale(1); filter: drop-shadow(0 0 2px #00f0ff); }
+            100% { transform: scale(1.15); filter: drop-shadow(0 0 12px #ff00e4); }
+        }
+
+        .perfect-star {
+            display: inline-block;
+            animation: perfectPulse 0.8s infinite alternate ease-in-out;
+        }
+
         /* Results Card Responsive Inner */
         .results-card-inner {
             max-width: min(760px, 94vw);
@@ -941,6 +969,34 @@
                     <button id="btn-resume" class="btn-dive" type="button">Resume Dive (P)</button>
                     <button id="btn-pause-restart" class="btn-secondary" type="button">Restart Dive (R)</button>
                     <button id="btn-pause-exit" class="btn-secondary" type="button">Exit to Track Select (X)</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Results Menu Overlay -->
+        <div id="complete-screen" class="results-overlay" style="display: none;">
+            <div class="glass-card results-card-inner">
+                <header style="text-align: center; margin-bottom: 4px;">
+                    <h1 id="results-title" class="glow-title" style="font-size: clamp(1.6rem, 3.5vw, 2.2rem); font-weight: 700; margin-bottom: 6px; letter-spacing: 2px;">DIVE COMPLETED</h1>
+                    <div id="results-track-info" style="font-size: 0.85rem; color: #94a3b8; margin-top: -4px; margin-bottom: 6px; font-weight: 500; letter-spacing: 1px;">
+                        TRACK (0:00)
+                    </div>
+                    <div id="results-stars" style="margin-bottom: 8px; display: flex; justify-content: center; align-items: center;"></div>
+                </header>
+                <div class="results-grid">
+                    <div class="results-col-stats">
+                        <div id="results-stats-box" style="font-size: 1.0rem; color: #cbd5e1; line-height: 1.5; background: rgba(255, 255, 255, 0.02); padding: 10px 14px; border-radius: 12px; border: 1px solid rgba(255, 255, 255, 0.05);">
+                            Neon Debris: <strong id="results-debris" style="color: #00f0ff; font-size: 1.15rem;">0</strong> / <span id="results-total-debris">0</span><br>
+                            Total Score: <strong id="results-score" style="color: #bd00ff; font-size: 1.3rem; text-shadow: 0 0 12px rgba(189, 0, 255, 0.4);">0</strong> / <span id="results-max-points">0</span> pts
+                        </div>
+                        <div id="results-highscore"></div>
+                    </div>
+                    <div class="results-col-actions">
+                        <div style="display: flex; flex-direction: column; gap: 8px; margin-top: 4px;">
+                            <button id="btn-restart" class="btn-dive" type="button" style="width: 100%; padding: 10px 18px; font-size: 0.92rem; box-shadow: 0 0 25px rgba(189, 0, 255, 0.4);">DIVE AGAIN (R)</button>
+                            <button id="btn-results-exit" class="btn-secondary" type="button" style="width: 100%; padding: 9px 16px; font-size: 0.85rem;">SELECT NEW TRACK (X)</button>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -1197,6 +1253,19 @@
         });
 
         bindFastTap(document.getElementById('btn-pause-exit'), () => {
+            if (window.activeScubaScene) {
+                window.activeScubaScene.exitToTrackSelect();
+            }
+        });
+
+        // Results Menu Wire-up
+        bindFastTap(document.getElementById('btn-restart'), () => {
+            if (window.activeScubaScene) {
+                window.activeScubaScene.restartDive();
+            }
+        });
+
+        bindFastTap(document.getElementById('btn-results-exit'), () => {
             if (window.activeScubaScene) {
                 window.activeScubaScene.exitToTrackSelect();
             }
